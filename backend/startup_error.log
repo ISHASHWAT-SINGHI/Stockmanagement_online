@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\ssrat\Desktop\New folder\Project\stockmanagement_online\backend\main.py", line 7, in <module>
+    from fastapi import FastAPI
+ModuleNotFoundError: No module named 'fastapi'

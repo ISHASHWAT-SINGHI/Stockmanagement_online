@@ -1,0 +1,1 @@
+Error: Could not connect to the configured online database. Failures: postgresql+asyncpg://postgres.rydlihjfjndlufdywmiu:***@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres -> Tenant or user not found; postgresql+asyncpg://postgres:***@db.rydlihjfjndlufdywmiu.supabase.co:5432/postgres -> [Errno 11001] getaddrinfo failed

@@ -1,0 +1,11 @@
+fastapi==0.111.0
+uvicorn==0.29.0
+sqlalchemy==2.0.30
+python-dotenv==1.0.1
+asyncpg
+psycopg2-binary
+pydantic==2.7.1
+pydantic-settings==2.2.1
+python-jose[cryptography]
+bcrypt
+python-multipart
