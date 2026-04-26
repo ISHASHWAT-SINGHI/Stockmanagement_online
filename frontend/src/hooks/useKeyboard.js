@@ -8,14 +8,15 @@ import { useEffect } from 'react';
  */
 export function useKeyboardShortcut(key, cb, mods = { alt: true }) {
     useEffect(() => {
+        const { alt = false, ctrl = false, shift = false, allowInInput = false } = mods;
         const handler = (e) => {
-            if (mods.alt && !e.altKey) return;
-            if (mods.ctrl && !e.ctrlKey) return;
-            if (mods.shift && !e.shiftKey) return;
+            if (alt && !e.altKey) return;
+            if (ctrl && !e.ctrlKey) return;
+            if (shift && !e.shiftKey) return;
             if (e.key.toLowerCase() !== key.toLowerCase()) return;
-            // Don't fire when typing in an input/textarea/select
             const tag = document.activeElement?.tagName?.toLowerCase();
-            if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+            const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select' || document.activeElement?.isContentEditable;
+            if (isEditable && !allowInInput) return;
             e.preventDefault();
             cb();
         };

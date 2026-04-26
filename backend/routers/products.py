@@ -87,6 +87,38 @@ async def unarchive_product(product_id: int, db: AsyncSession = Depends(get_db))
     return {"detail": "Product unarchived"}
 
 
+@router.post("/products/bulk-unarchive")
+async def bulk_unarchive_products(payload: schemas.ProductBulkUnarchiveRequest, db: AsyncSession = Depends(get_db)):
+    product_ids = sorted(set(payload.product_ids))
+    if not product_ids:
+        raise HTTPException(status_code=400, detail="Select at least one archived product.")
+
+    result = await db.execute(
+        select(models.Product).where(
+            models.Product.id.in_(product_ids),
+            models.Product.is_deleted == False,
+        )
+    )
+    products = result.scalars().all()
+    if not products:
+        raise HTTPException(status_code=404, detail="No matching products found.")
+
+    updated = 0
+    for product in products:
+        if product.is_archived:
+            product.is_archived = False
+            updated += 1
+
+    if updated == 0:
+        raise HTTPException(status_code=400, detail="Selected products are already active.")
+
+    await db.commit()
+    return {
+        "detail": f"Unarchived {updated} product{'s' if updated != 1 else ''}.",
+        "count": updated,
+    }
+
+
 # ─── Barcodes ────────────────────────────────────────────────────────────────
 
 @router.get("/barcodes", response_model=List[schemas.BarcodeResponse])

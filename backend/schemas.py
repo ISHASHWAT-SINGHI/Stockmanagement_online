@@ -93,6 +93,10 @@ class ProductResponse(ProductBase):
         from_attributes = True
 
 
+class ProductBulkUnarchiveRequest(BaseModel):
+    product_ids: List[int]
+
+
 # ─── Barcode ─────────────────────────────────────────────────────────────────
 
 class BarcodeBase(BaseModel):

@@ -56,6 +56,7 @@ export const createProduct = (data) => api.post('/products', data);
 export const updateProduct = (id, data) => api.put(`/products/${id}`, data);
 export const archiveProduct = (id) => api.post(`/products/${id}/archive`);
 export const unarchiveProduct = (id) => api.post(`/products/${id}/unarchive`);
+export const bulkUnarchiveProducts = (productIds) => api.post('/products/bulk-unarchive', { product_ids: productIds });
 
 // ─── Barcodes ────────────────────────────────────────────────────────────────
 export const getBarcodeInfo = (bc) => api.get(`/barcodes/${bc}`);

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Plus, Pencil, Archive, ArchiveRestore, Package } from 'lucide-react';
-import { getProducts, createProduct, updateProduct, archiveProduct, unarchiveProduct } from '../api';
+import { getProducts, createProduct, updateProduct, archiveProduct, unarchiveProduct, bulkUnarchiveProducts } from '../api';
 import { useKeyboardShortcut } from '../hooks/useKeyboard';
 import { useToast } from '../hooks/useToast';
 import Modal from '../components/Modal';
@@ -19,6 +19,7 @@ export default function Products() {
     const [form, setForm] = useState(empty);
     const [editing, setEditing] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [selectedArchivedIds, setSelectedArchivedIds] = useState([]);
 
     // Adjust stock state
     const [adjustProduct, setAdjustProduct] = useState(null);
@@ -34,6 +35,14 @@ export default function Products() {
     }, [addToast, showArchived]);
 
     useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        if (!showArchived) {
+            setSelectedArchivedIds([]);
+        }
+    }, [showArchived]);
+    useEffect(() => {
+        setSelectedArchivedIds(prev => prev.filter(id => products.some(product => product.id === id && product.is_archived)));
+    }, [products]);
 
     useKeyboardShortcut('n', () => openAdd());
 
@@ -106,9 +115,37 @@ export default function Products() {
         catch (err) { addToast(err.response?.data?.detail || 'Unarchive failed', 'error'); }
     };
 
+    const toggleArchivedSelection = (id) => {
+        setSelectedArchivedIds(prev => prev.includes(id) ? prev.filter(itemId => itemId !== id) : [...prev, id]);
+    };
+
     const filtered = products.filter(p =>
         !searchQuery || [p.product_name, p.brand_name].some(v => v?.toLowerCase().includes(searchQuery.toLowerCase()))
     );
+    const archivedVisibleIds = filtered.filter(product => product.is_archived).map(product => product.id);
+    const allArchivedVisibleSelected = archivedVisibleIds.length > 0 && archivedVisibleIds.every(id => selectedArchivedIds.includes(id));
+
+    const toggleAllArchivedVisible = () => {
+        setSelectedArchivedIds(prev => {
+            if (allArchivedVisibleSelected) {
+                return prev.filter(id => !archivedVisibleIds.includes(id));
+            }
+            return [...new Set([...prev, ...archivedVisibleIds])];
+        });
+    };
+
+    const bulkUnarchive = async () => {
+        if (selectedArchivedIds.length === 0) return;
+        if (!window.confirm(`Unarchive ${selectedArchivedIds.length} selected product${selectedArchivedIds.length === 1 ? '' : 's'}?`)) return;
+        try {
+            const response = await bulkUnarchiveProducts(selectedArchivedIds);
+            addToast(response.data?.detail || 'Products unarchived', 'success');
+            setSelectedArchivedIds([]);
+            load();
+        } catch (err) {
+            addToast(err.response?.data?.detail || 'Bulk unarchive failed', 'error');
+        }
+    };
 
     const stockBadge = (n) => {
         if (n === 0) return <span className="badge badge-danger">Out</span>;
@@ -121,6 +158,11 @@ export default function Products() {
             <div className="page-header">
                 <h2 className="page-title">Products</h2>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {showArchived && archivedVisibleIds.length > 0 && (
+                        <button className="btn btn-ghost btn-sm" onClick={bulkUnarchive} disabled={selectedArchivedIds.length === 0}>
+                            <ArchiveRestore size={15} /> Unarchive Selected ({selectedArchivedIds.length})
+                        </button>
+                    )}
                     <button className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setShowArchived(!showArchived)}>
                         {showArchived ? 'Hide Archived' : 'Show Archived'}
                     </button>
@@ -141,6 +183,16 @@ export default function Products() {
                     <table className="data-table">
                         <thead>
                             <tr>
+                                {showArchived && (
+                                    <th style={{ width: 40, textAlign: 'center' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={allArchivedVisibleSelected}
+                                            onChange={toggleAllArchivedVisible}
+                                            aria-label="Select all archived products"
+                                        />
+                                    </th>
+                                )}
                                 <th>#</th>
                                 <th>Product Name</th>
                                 <th>Brand</th>
@@ -153,6 +205,18 @@ export default function Products() {
                         <tbody>
                             {filtered.map((p, i) => (
                                 <tr key={p.id}>
+                                    {showArchived && (
+                                        <td style={{ textAlign: 'center' }}>
+                                            {p.is_archived ? (
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedArchivedIds.includes(p.id)}
+                                                    onChange={() => toggleArchivedSelection(p.id)}
+                                                    aria-label={`Select ${p.product_name}`}
+                                                />
+                                            ) : null}
+                                        </td>
+                                    )}
                                     <td style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{i + 1}</td>
                                     <td style={{ fontWeight: 500 }}>{p.product_name}</td>
                                     <td style={{ color: 'var(--text-muted)' }}>{p.brand_name || '—'}</td>

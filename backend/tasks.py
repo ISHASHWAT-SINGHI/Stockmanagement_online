@@ -1,7 +1,7 @@
 import asyncio
 import datetime
 from sqlalchemy.future import select
-from sqlalchemy import or_, and_, text
+from sqlalchemy import exists
 from database import SessionLocal
 import models
 import logging
@@ -15,12 +15,20 @@ async def auto_archive_products():
             async with SessionLocal() as db:
                 sixty_days_ago = datetime.datetime.utcnow() - datetime.timedelta(days=60)
                 
-                # Find products with exactly 0 stock, not deleted, not archived
+                # Only consider products that have actually had stock before.
+                # New products start at 0 stock and should not be auto-archived
+                # until they have real inventory history and later return to 0.
                 result = await db.execute(
                     select(models.Product).where(
                         models.Product.current_stock == 0,
                         models.Product.is_deleted == False,
-                        models.Product.is_archived == False
+                        models.Product.is_archived == False,
+                        exists(
+                            select(models.StockBatch.id).where(
+                                models.StockBatch.product_id == models.Product.id,
+                                models.StockBatch.initial_quantity > 0,
+                            )
+                        ),
                     )
                 )
                 products_to_check = result.scalars().all()

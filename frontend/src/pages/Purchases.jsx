@@ -9,10 +9,71 @@ function emptyItem() {
     return { product_id: '', product_name: '', quantity: 1, unit_price: 0, gst_percent: 12, line_total: 0 };
 }
 
-function calcItem(it) {
-    const base = it.unit_price * it.quantity;
-    const gst = base * it.gst_percent / 100;
-    return { ...it, line_total: +(base + gst).toFixed(2) };
+function normalizeText(value = '') {
+    return value.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function getProductDisplayName(product) {
+    return [product.brand_name, product.product_name].filter(Boolean).join(' ');
+}
+
+function matchesProductSearch(product, rawQuery) {
+    const query = normalizeText(rawQuery);
+    if (!query) return false;
+    return [
+        normalizeText(product.product_name),
+        normalizeText(product.brand_name || ''),
+        normalizeText(getProductDisplayName(product)),
+    ].some(value => value.includes(query));
+}
+
+function findExactProductMatch(products, rawQuery) {
+    const query = normalizeText(rawQuery);
+    if (!query) return null;
+    const matches = products.filter(product => [
+        normalizeText(product.product_name),
+        normalizeText(product.brand_name || ''),
+        normalizeText(getProductDisplayName(product)),
+    ].includes(query));
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function findExactSupplierMatch(suppliers, rawQuery) {
+    const query = normalizeText(rawQuery);
+    if (!query) return null;
+    const matches = suppliers.filter(supplier => normalizeText(supplier.company_name) === query);
+    return matches.length === 1 ? matches[0] : null;
+}
+
+// calcItem handles both tax-inclusive and tax-exclusive modes
+// priceIncludesTax: false = exclusive (user enters base price, system adds tax)
+// priceIncludesTax: true = inclusive (user enters final price, system calculates base + tax)
+function calcItem(it, priceIncludesTax = false) {
+    const qty = Number(it.quantity) || 0;
+    const taxRate = Number(it.gst_percent) || 0;
+    const unitPrice = Number(it.unit_price) || 0;
+
+    if (priceIncludesTax) {
+        const grossTotal = unitPrice * qty;
+        const baseTotal = taxRate > 0 ? grossTotal / (1 + taxRate / 100) : grossTotal;
+        const gst = grossTotal - baseTotal;
+        const baseUnitPrice = qty > 0 ? baseTotal / qty : 0;
+        return {
+            ...it,
+            line_total: +grossTotal.toFixed(2),
+            base_unit_price: +baseUnitPrice.toFixed(4),
+            gst_amount: +gst.toFixed(2),
+        };
+    } else {
+        const baseTotal = unitPrice * qty;
+        const gst = baseTotal * taxRate / 100;
+        return {
+            ...it,
+            line_total: +(baseTotal + gst).toFixed(2),
+            base_unit_price: +unitPrice.toFixed(4),
+            gst_amount: +gst.toFixed(2),
+        };
+    }
 }
 
 export default function Purchases() {
@@ -30,11 +91,13 @@ export default function Purchases() {
     const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
     const [items, setItems] = useState([emptyItem()]);
     const [saving, setSaving] = useState(false);
+    const [priceIncludesTax, setPriceIncludesTax] = useState(false); // Bill-level tax toggle
     
     const [productSuggestions, setProductSuggestions] = useState({ index: null, list: [], activeIdx: -1 });
     const [selectedInvoice, setSelectedInvoice] = useState(null);
     
     const itemRefs = useRef([]);
+    const productInputRefs = useRef([]);
 
     const load = useCallback(async () => {
         try {
@@ -47,15 +110,23 @@ export default function Purchases() {
 
     useEffect(() => { load(); }, [load]);
 
-    useKeyboardShortcut('n', () => addRow());
+    useKeyboardShortcut('n', () => addRow(true), { alt: true, allowInInput: true });
 
-    const addRow = () => setItems(prev => [...prev, emptyItem()]);
+    const focusProductInputAt = (index) => {
+        window.setTimeout(() => productInputRefs.current[index]?.focus(), 0);
+    };
+
+    const addRow = (focusProduct = false) => {
+        const nextIndex = items.length;
+        setItems(prev => [...prev, emptyItem()]);
+        if (focusProduct) focusProductInputAt(nextIndex);
+    };
     const removeRow = (i) => setItems(prev => prev.filter((_, idx) => idx !== i));
 
     const updateItem = (i, field, val) => {
         setItems(prev => {
             const next = [...prev];
-            next[i] = calcItem({ ...next[i], [field]: val });
+            next[i] = calcItem({ ...next[i], [field]: val }, priceIncludesTax);
             return next;
         });
     };
@@ -66,20 +137,34 @@ export default function Purchases() {
         if (val.length < 2) { setProductSuggestions({ index: null, list: [], activeIdx: -1 }); return; }
         setProductSuggestions({
             index: i, activeIdx: -1, list: products.filter(p =>
-                p.product_name.toLowerCase().includes(val.toLowerCase()) ||
-                (p.brand_name || '').toLowerCase().includes(val.toLowerCase())
+                matchesProductSearch(p, val)
             ).slice(0, 8)
         });
     };
 
-    const selectProduct = (i, product) => {
+    const applyProductSelection = (i, product, focusQuantity = true) => {
         setProductSuggestions({ index: null, list: [], activeIdx: -1 });
         setItems(prev => {
             const next = [...prev];
-            next[i] = calcItem({ ...next[i], product_id: product.id, product_name: `${product.brand_name ? product.brand_name + ' ' : ''}${product.product_name}` });
+            next[i] = calcItem({ ...next[i], product_id: product.id, product_name: getProductDisplayName(product) }, priceIncludesTax);
             return next;
         });
-        setTimeout(() => itemRefs.current[i]?.focus(), 50);
+        if (focusQuantity) {
+            window.setTimeout(() => itemRefs.current[i]?.focus(), 50);
+        }
+    };
+
+    const selectProduct = (i, product) => {
+        applyProductSelection(i, product, true);
+    };
+
+    const commitProductMatch = (i, rawValue) => {
+        const exactMatch = findExactProductMatch(products, rawValue);
+        if (exactMatch) {
+            applyProductSelection(i, exactMatch, false);
+        } else if (productSuggestions.index === i) {
+            setProductSuggestions({ index: null, list: [], activeIdx: -1 });
+        }
     };
 
     const onProductKeyDown = (e, i) => {
@@ -106,9 +191,21 @@ export default function Purchases() {
     };
 
     const handleSupplierSearch = (val) => {
-        setSupplierSearch(val); setSupplierId('');
+        const exactMatch = findExactSupplierMatch(suppliers, val);
+        setSupplierSearch(val);
+        setSupplierId(exactMatch ? exactMatch.id : '');
         setSupplierSuggestIndex(-1);
-        setSupplierSuggestions(val ? suppliers.filter(s => s.company_name.toLowerCase().includes(val.toLowerCase())).slice(0, 6) : []);
+        setSupplierSuggestions(val ? suppliers.filter(s => normalizeText(s.company_name).includes(normalizeText(val))).slice(0, 6) : []);
+    };
+
+    const commitSupplierMatch = (rawValue) => {
+        const exactMatch = findExactSupplierMatch(suppliers, rawValue);
+        if (exactMatch) {
+            setSupplierId(exactMatch.id);
+            setSupplierSearch(exactMatch.company_name);
+        }
+        setSupplierSuggestions([]);
+        return exactMatch;
     };
     
     const onSupplierKeyDown = (e) => {
@@ -143,27 +240,61 @@ export default function Purchases() {
     };
 
     const totalAmount = items.reduce((s, it) => s + (it.line_total || 0), 0);
+    const resolveItemsForSave = () => items.map(it => {
+        if (it.product_id || !it.product_name?.trim()) return it;
+        const exactMatch = findExactProductMatch(products, it.product_name);
+        return exactMatch
+            ? calcItem({ ...it, product_id: exactMatch.id, product_name: getProductDisplayName(exactMatch) }, priceIncludesTax)
+            : it;
+    });
+
+    const getPurchasePayloadItem = (item) => {
+        const taxRate = Number(item.gst_percent) || 0;
+        const enteredUnitPrice = Number(item.unit_price) || 0;
+        const baseUnitPrice = priceIncludesTax && taxRate > 0
+            ? enteredUnitPrice / (1 + taxRate / 100)
+            : enteredUnitPrice;
+        return {
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_price: +baseUnitPrice.toFixed(4),
+            gst_percent: item.gst_percent,
+            line_total: item.line_total,
+        };
+    };
+
+    const onTaxFieldKeyDown = (e, i) => {
+        if (e.key === 'Tab' && !e.shiftKey && i === items.length - 1) {
+            e.preventDefault();
+            addRow(true);
+        }
+    };
 
     const saveInvoice = async () => {
-        if (!supplierId) { addToast('Select a supplier', 'error'); return; }
+        const matchedSupplier = supplierId
+            ? suppliers.find(s => s.id === Number(supplierId))
+            : commitSupplierMatch(supplierSearch);
+        if (!matchedSupplier) { addToast('Select a supplier', 'error'); return; }
         if (!invoiceNo.trim()) { addToast('Invoice number is required', 'error'); return; }
-        const validItems = items.filter(it => it.product_id && it.quantity > 0);
+        const preparedItems = resolveItemsForSave();
+        setItems(preparedItems);
+        const unresolvedItems = preparedItems.filter(it => it.product_name?.trim() && !it.product_id);
+        if (unresolvedItems.length > 0) {
+            addToast('Choose products from the suggestion list or type an exact product name.', 'error');
+            return;
+        }
+        const validItems = preparedItems.filter(it => it.product_id && it.quantity > 0);
         if (validItems.length === 0) { addToast('Add at least one mapped product (select from suggestion)', 'error'); return; }
+        const invoiceTotal = validItems.reduce((sum, item) => sum + (item.line_total || 0), 0);
         
         setSaving(true);
         try {
             await createPurchaseInvoice({
-                supplier_id: +supplierId,
+                supplier_id: matchedSupplier.id,
                 invoice_number: invoiceNo,
                 invoice_date: invoiceDate,
-                total_amount: +totalAmount.toFixed(2),
-                items: validItems.map(it => ({
-                    product_id: it.product_id,
-                    quantity: it.quantity,
-                    unit_price: it.unit_price,
-                    gst_percent: it.gst_percent,
-                    line_total: it.line_total,
-                })),
+                total_amount: +invoiceTotal.toFixed(2),
+                items: validItems.map(getPurchasePayloadItem),
             });
             addToast('Purchase invoice saved!', 'success');
             setItems([emptyItem()]); setSupplierId(''); setSupplierSearch('');
@@ -187,7 +318,7 @@ export default function Purchases() {
                 </div>
                 {view === 'new' && (
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button className="btn btn-ghost btn-sm" onClick={addRow}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
                         <button className="btn btn-primary" onClick={saveInvoice} disabled={saving}>
                             <Save size={14} /> {saving ? 'Saving…' : 'Save Invoice'} <kbd className="kbd">Alt+↵</kbd>
                         </button>
@@ -229,6 +360,7 @@ export default function Purchases() {
                                     <label className="form-label">Supplier *</label>
                                     <input value={supplierSearch} onChange={e => handleSupplierSearch(e.target.value)}
                                         onKeyDown={onSupplierKeyDown}
+                                        onBlur={() => window.setTimeout(() => commitSupplierMatch(supplierSearch), 120)}
                                         placeholder="Search supplier…" autoComplete="off" />
                                     {supplierSuggestions.length > 0 && (
                                         <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 100, listStyle: 'none', margin: '2px 0', maxHeight: 180, overflowY: 'auto' }}>
@@ -253,20 +385,33 @@ export default function Purchases() {
                                     <label className="form-label">Invoice Number *</label>
                                     <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="Required" />
                                 </div>
+                                <div className="form-group">
+                                    <label className="form-label">Price Type</label>
+                                    <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+                                        <button className="btn btn-sm" onClick={() => { setPriceIncludesTax(false); setItems(prev => prev.map(it => calcItem(it, false))); }} style={{ flex: 1, borderRadius: 0, padding: '0.4rem 0.5rem', background: !priceIncludesTax ? 'var(--accent)' : 'var(--bg-elevated)', color: !priceIncludesTax ? '#fff' : 'var(--text-muted)', border: 'none' }}>Exclusive</button>
+                                        <button className="btn btn-sm" onClick={() => { setPriceIncludesTax(true); setItems(prev => prev.map(it => calcItem(it, true))); }} style={{ flex: 1, borderRadius: 0, padding: '0.4rem 0.5rem', background: priceIncludesTax ? 'var(--accent)' : 'var(--bg-elevated)', color: priceIncludesTax ? '#fff' : 'var(--text-muted)', border: 'none' }}>Inclusive</button>
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Unit Price Mode</label>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem', paddingTop: '0.55rem' }}>
+                                        {priceIncludesTax ? 'Enter price including GST; the invoice stores the computed base unit price.' : 'Enter base price before GST; GST is added to each line total.'}
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
                         {/* Items */}
                         <div className="surface" style={{ overflow: 'visible' }}> 
                             <div style={{ overflowX: 'visible' }}> 
-                                <table className="data-table" style={{ minWidth: 600 }}>
+                                <table className="data-table" style={{ minWidth: 760 }}>
                                     <thead>
                                         <tr>
-                                            <th style={{ minWidth: 200 }}>Product</th>
-                                            <th style={{ width: 80 }}>Qty</th>
-                                            <th style={{ width: 110 }}>Unit Price</th>
-                                            <th style={{ width: 80 }}>GST%</th>
-                                            <th style={{ textAlign: 'right', width: 110 }}>Line Total</th>
+                                            <th style={{ minWidth: 220 }}>Product</th>
+                                            <th style={{ width: 120 }}>Qty</th>
+                                            <th style={{ width: 160 }}>{priceIncludesTax ? 'Unit Price (Incl.)' : 'Unit Price'}</th>
+                                            <th style={{ width: 110 }}>GST%</th>
+                                            <th style={{ textAlign: 'right', width: 140 }}>Line Total</th>
                                             <th style={{ width: 40 }}></th>
                                         </tr>
                                     </thead>
@@ -274,8 +419,9 @@ export default function Purchases() {
                                         {items.map((it, i) => (
                                             <tr key={i}>
                                                 <td style={{ position: 'relative' }}>
-                                                    <input value={it.product_name} onChange={e => handleProductSearch(i, e.target.value)}
+                                                    <input ref={el => productInputRefs.current[i] = el} value={it.product_name} onChange={e => handleProductSearch(i, e.target.value)}
                                                         onKeyDown={e => onProductKeyDown(e, i)}
+                                                        onBlur={() => window.setTimeout(() => commitProductMatch(i, it.product_name), 120)}
                                                         placeholder="Type product…" style={{ fontSize: '0.82rem' }} autoComplete="off" />
                                                     {productSuggestions.index === i && productSuggestions.list.length > 0 && (
                                                         <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 9999, listStyle: 'none', margin: '2px 0', maxHeight: 200, overflowY: 'auto' }}>
@@ -297,14 +443,14 @@ export default function Purchases() {
                                                 <td>
                                                     <input ref={el => itemRefs.current[i] = el} type="number" min={1} value={it.quantity}
                                                         onChange={e => updateItem(i, 'quantity', +e.target.value)} style={{ fontSize: '0.82rem' }}
-                                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addRow(); } }} />
+                                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addRow(true); } }} />
                                                 </td>
                                                 <td>
                                                     <input type="number" min={0} step={0.01} value={it.unit_price}
                                                         onChange={e => updateItem(i, 'unit_price', +e.target.value)} style={{ fontSize: '0.82rem' }} />
                                                 </td>
                                                 <td>
-                                                    <select value={it.gst_percent} onChange={e => updateItem(i, 'gst_percent', +e.target.value)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
+                                                    <select value={it.gst_percent} onChange={e => updateItem(i, 'gst_percent', +e.target.value)} onKeyDown={e => onTaxFieldKeyDown(e, i)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
                                                         {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}%</option>)}
                                                     </select>
                                                 </td>

@@ -544,6 +544,16 @@ button {
     color: var(--text-primary);
 }
 
+.data-table td input[type="number"],
+.data-table td select {
+    width: 100%;
+    min-width: 0;
+}
+
+.data-table td input[type="number"] {
+    text-align: right;
+}
+
 /* ─── Print ─── */
 @media print {
     body { background: white; color: black; }

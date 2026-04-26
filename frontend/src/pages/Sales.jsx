@@ -11,6 +11,35 @@ function emptyItem() {
     return { product_id: '', stock_batch_id: '', product_name: '', quantity: 1, selling_price: 0, gst_percent: 12, discount_percent: 0, final_amount: 0, available: 0 };
 }
 
+function normalizeText(value = '') {
+    return value.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function getProductDisplayName(product) {
+    return [product.brand_name, product.product_name].filter(Boolean).join(' ');
+}
+
+function matchesProductSearch(product, rawQuery) {
+    const query = normalizeText(rawQuery);
+    if (!query) return false;
+    return [
+        normalizeText(product.product_name),
+        normalizeText(product.brand_name || ''),
+        normalizeText(getProductDisplayName(product)),
+    ].some(value => value.includes(query));
+}
+
+function findExactProductMatch(products, rawQuery) {
+    const query = normalizeText(rawQuery);
+    if (!query) return null;
+    const matches = products.filter(product => [
+        normalizeText(product.product_name),
+        normalizeText(product.brand_name || ''),
+        normalizeText(getProductDisplayName(product)),
+    ].includes(query));
+    return matches.length === 1 ? matches[0] : null;
+}
+
 function calcItem(it) {
     const base = it.selling_price * it.quantity;
     const afterDiscount = base - (base * it.discount_percent / 100);
@@ -65,6 +94,7 @@ export default function Sales() {
     const [selectedBill, setSelectedBill] = useState(null);
     const [settings, setSettings] = useState(null);
     const itemRefs = useRef([]);
+    const productInputRefs = useRef([]);
 
     const load = useCallback(async () => {
         try {
@@ -79,9 +109,17 @@ export default function Sales() {
     useEffect(() => { load(); }, [load]);
 
     // Alt+N → add new item row
-    useKeyboardShortcut('n', () => addRow());
+    useKeyboardShortcut('n', () => addRow(true), { alt: true, allowInInput: true });
 
-    const addRow = () => setItems(prev => [...prev, emptyItem()]);
+    const focusProductInputAt = (index) => {
+        window.setTimeout(() => productInputRefs.current[index]?.focus(), 0);
+    };
+
+    const addRow = (focusProduct = false) => {
+        const nextIndex = items.length;
+        setItems(prev => [...prev, emptyItem()]);
+        if (focusProduct) focusProductInputAt(nextIndex);
+    };
 
     const removeRow = (i) => setItems(prev => prev.filter((_, idx) => idx !== i));
 
@@ -98,14 +136,11 @@ export default function Sales() {
         updateItem(i, 'product_name', val);
         updateItem(i, 'product_id', '');
         if (val.length < 2) { setProductSuggestions({ index: null, list: [], activeIdx: -1 }); return; }
-        const list = products.filter(p =>
-            p.product_name.toLowerCase().includes(val.toLowerCase()) ||
-            (p.brand_name || '').toLowerCase().includes(val.toLowerCase())
-        ).slice(0, 8);
+        const list = products.filter(p => matchesProductSearch(p, val)).slice(0, 8);
         setProductSuggestions({ index: i, list, activeIdx: -1 });
     };
 
-    const selectProduct = async (i, product) => {
+    const applyProductSelection = async (i, product, focusQuantity = true) => {
         setProductSuggestions({ index: null, list: [], activeIdx: -1 });
         let batchId = '';
         let available = 0;
@@ -115,10 +150,25 @@ export default function Sales() {
         } catch { /* no batches */ }
         setItems(prev => {
             const next = [...prev];
-            next[i] = calcItem({ ...next[i], product_id: product.id, stock_batch_id: batchId, product_name: `${product.brand_name ? product.brand_name + ' ' : ''}${product.product_name}`, available });
+            next[i] = calcItem({ ...next[i], product_id: product.id, stock_batch_id: batchId, product_name: getProductDisplayName(product), available });
             return next;
         });
-        setTimeout(() => itemRefs.current[i]?.focus(), 50);
+        if (focusQuantity) {
+            window.setTimeout(() => itemRefs.current[i]?.focus(), 50);
+        }
+    };
+
+    const selectProduct = async (i, product) => {
+        await applyProductSelection(i, product, true);
+    };
+
+    const commitProductMatch = async (i, rawValue) => {
+        const exactMatch = findExactProductMatch(products, rawValue);
+        if (exactMatch) {
+            await applyProductSelection(i, exactMatch, false);
+        } else if (productSuggestions.index === i) {
+            setProductSuggestions({ index: null, list: [], activeIdx: -1 });
+        }
     };
 
     const onProductKeyDown = (e, i) => {
@@ -192,23 +242,65 @@ export default function Sales() {
 
     const totals = calcBill(items.filter(i => i.product_id), discountAmt, isDiscountPercent);
     const nextBillNo = `BILL-${Date.now().toString().slice(-6)}`;
+    const resolveItemsForSave = async () => {
+        const resolved = await Promise.all(items.map(async (item) => {
+            if (item.product_id || !item.product_name?.trim()) return item;
+            const exactMatch = findExactProductMatch(products, item.product_name);
+            if (!exactMatch) return item;
+
+            let batchId = '';
+            let available = 0;
+            try {
+                const response = await getStockBatchesForProduct(exactMatch.id);
+                if (response.data.length > 0) {
+                    batchId = response.data[0].id;
+                    available = response.data[0].available_quantity;
+                }
+            } catch { /* keep unresolved */ }
+
+            return calcItem({
+                ...item,
+                product_id: exactMatch.id,
+                stock_batch_id: batchId,
+                product_name: getProductDisplayName(exactMatch),
+                available,
+            });
+        }));
+
+        setItems(resolved);
+        return resolved;
+    };
+
+    const onLastEditableFieldKeyDown = (e, i) => {
+        if (e.key === 'Tab' && !e.shiftKey && i === items.length - 1) {
+            e.preventDefault();
+            addRow(true);
+        }
+    };
 
     const saveBill = async () => {
-        const validItems = items.filter(i => i.product_id && i.stock_batch_id && i.quantity > 0);
+        const preparedItems = await resolveItemsForSave();
+        const unresolvedItems = preparedItems.filter(item => item.product_name?.trim() && (!item.product_id || !item.stock_batch_id));
+        if (unresolvedItems.length > 0) {
+            addToast('Choose products from the suggestion list or type an exact product name with stock.', 'error');
+            return;
+        }
+        const validItems = preparedItems.filter(i => i.product_id && i.stock_batch_id && i.quantity > 0);
         if (validItems.length === 0) { addToast('Add at least one product with stock', 'error'); return; }
-        const paid = paidAmt === '' ? totals.grand : parseFloat(paidAmt);
-        const outstanding = Math.max(0, totals.grand - paid);
+        const billTotals = calcBill(validItems, discountAmt, isDiscountPercent);
+        const paid = paidAmt === '' ? billTotals.grand : parseFloat(paidAmt);
+        const outstanding = Math.max(0, billTotals.grand - paid);
         setSaving(true);
         try {
             await createSale({
                 customer_id: customerId || null,
                 bill_number: nextBillNo,
-                subtotal: totals.subtotal,
-                discount_amount: totals.extraDiscountValue,
-                taxable_amount: totals.taxable,
-                cgst_amount: totals.cgst,
-                sgst_amount: totals.sgst,
-                grand_total: totals.grand,
+                subtotal: billTotals.subtotal,
+                discount_amount: billTotals.extraDiscountValue,
+                taxable_amount: billTotals.taxable,
+                cgst_amount: billTotals.cgst,
+                sgst_amount: billTotals.sgst,
+                grand_total: billTotals.grand,
                 paid_amount: paid,
                 outstanding_amount: outstanding,
                 payment_status: outstanding === 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending',
@@ -254,7 +346,7 @@ export default function Sales() {
                 </div>
                 {view === 'new' && (
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button className="btn btn-ghost btn-sm" onClick={addRow}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
                         <button className="btn btn-primary" onClick={saveBill} disabled={saving}>
                             <Save size={14} /> {saving ? 'Saving…' : 'Save Bill'} <kbd className="kbd">Alt+↵</kbd>
                         </button>
@@ -320,15 +412,15 @@ export default function Sales() {
                         {/* Items table */}
                         <div className="surface" style={{ overflow: 'visible', zIndex: 5 }}>
                             <div style={{ overflowX: 'visible' }}>
-                                <table className="data-table" style={{ minWidth: 640 }}>
+                                <table className="data-table" style={{ minWidth: 820 }}>
                                     <thead>
                                         <tr>
-                                            <th style={{ minWidth: 200 }}>Product</th>
-                                            <th style={{ width: 80 }}>Qty</th>
-                                            <th style={{ width: 100 }}>Price</th>
-                                            <th style={{ width: 80 }}>GST%</th>
-                                            <th style={{ width: 80 }}>Disc%</th>
-                                            <th style={{ textAlign: 'right', width: 100 }}>Amount</th>
+                                            <th style={{ minWidth: 220 }}>Product</th>
+                                            <th style={{ width: 120 }}>Qty</th>
+                                            <th style={{ width: 150 }}>Price</th>
+                                            <th style={{ width: 100 }}>GST%</th>
+                                            <th style={{ width: 100 }}>Disc%</th>
+                                            <th style={{ textAlign: 'right', width: 130 }}>Amount</th>
                                             <th style={{ width: 40 }}></th>
                                         </tr>
                                     </thead>
@@ -337,9 +429,11 @@ export default function Sales() {
                                             <tr key={i}>
                                                 <td style={{ position: 'relative' }}>
                                                     <input
+                                                        ref={el => productInputRefs.current[i] = el}
                                                         value={it.product_name}
                                                         onChange={e => handleProductSearch(i, e.target.value)}
                                                         onKeyDown={e => onProductKeyDown(e, i)}
+                                                        onBlur={() => window.setTimeout(() => { void commitProductMatch(i, it.product_name); }, 120)}
                                                         placeholder="Type product name…"
                                                         style={{ fontSize: '0.82rem' }}
                                                         autoComplete="off"
@@ -367,11 +461,11 @@ export default function Sales() {
                                                         type="number" min={1} value={it.quantity}
                                                         onChange={e => updateItem(i, 'quantity', +e.target.value)}
                                                         style={{ fontSize: '0.82rem' }}
-                                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addRow(); } }}
+                                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addRow(true); } }}
                                                     />
                                                 </td>
                                                 <td>
-                                                    <input type="number" min={0} value={it.selling_price} onChange={e => updateItem(i, 'selling_price', +e.target.value)} style={{ fontSize: '0.82rem' }} />
+                                                    <input type="number" min={0} step={0.01} value={it.selling_price} onChange={e => updateItem(i, 'selling_price', +e.target.value)} style={{ fontSize: '0.82rem' }} />
                                                 </td>
                                                 <td>
                                                     <select value={it.gst_percent} onChange={e => updateItem(i, 'gst_percent', +e.target.value)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
@@ -379,7 +473,7 @@ export default function Sales() {
                                                     </select>
                                                 </td>
                                                 <td>
-                                                    <input type="number" min={0} max={100} value={it.discount_percent} onChange={e => updateItem(i, 'discount_percent', +e.target.value)} style={{ fontSize: '0.82rem' }} />
+                                                    <input type="number" min={0} max={100} value={it.discount_percent} onChange={e => updateItem(i, 'discount_percent', +e.target.value)} onKeyDown={e => onLastEditableFieldKeyDown(e, i)} style={{ fontSize: '0.82rem' }} />
                                                 </td>
                                                 <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
                                                     ₹{it.final_amount.toFixed(2)}
@@ -534,7 +628,7 @@ export default function Sales() {
 
             {/* Hidden Printable Invoice */}
             {selectedBill && settings && (
-                <div className="printable-area" style={{ display: 'none' }}>
+                <div className="printable-area">
                     <div style={{ padding: '40px', color: '#000', background: '#fff' }}>
                         <div style={{ textAlign: 'center', marginBottom: '30px', borderBottom: '2px solid #333', paddingBottom: '20px' }}>
                             <h1 style={{ margin: 0, fontSize: '28px', color: '#000' }}>{settings.company_name}</h1>
