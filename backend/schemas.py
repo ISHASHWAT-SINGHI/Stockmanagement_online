@@ -237,6 +237,7 @@ class SalesBillResponse(BaseModel):
 
 class SalesBillDetailResponse(SalesBillResponse):
     sales_items: List[SaleItemResponse] = []
+    customer: Optional[CustomerResponse] = None
     class Config:
         from_attributes = True
 

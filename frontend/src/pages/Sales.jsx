@@ -332,6 +332,37 @@ export default function Sales() {
         return () => window.removeEventListener('keydown', h);
     });
 
+    const formatDisplayDate = (value) => new Date(value).toLocaleDateString('en-IN');
+    const formatFileDate = (value) => {
+        const date = new Date(value);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    const printCustomer = selectedBill?.customer || customers.find(customer => customer.id === selectedBill?.customer_id) || null;
+
+    const handlePrint = () => {
+        if (!selectedBill) return;
+        const originalTitle = document.title;
+        const safeBillNumber = (selectedBill.bill_number || 'bill').replace(/[\\/:*?"<>|]/g, '-');
+        document.title = `bills-${safeBillNumber}-${formatFileDate(selectedBill.bill_date)}`;
+        const restoreTitle = () => {
+            document.title = originalTitle;
+            window.removeEventListener('afterprint', restoreTitle);
+        };
+        window.addEventListener('afterprint', restoreTitle);
+        window.setTimeout(() => {
+            try {
+                window.print();
+            } finally {
+                window.setTimeout(() => {
+                    restoreTitle();
+                }, 1000);
+            }
+        }, 100);
+    };
+
     return (
         <div>
             {/* Tab */}
@@ -579,14 +610,17 @@ export default function Sales() {
             {selectedBill && (
                 <Modal title={`Bill Details: ${selectedBill.bill_number}`} onClose={() => setSelectedBill(null)} footer={
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button className="btn btn-primary" onClick={() => { setTimeout(() => window.print(), 100) }}><Printer size={15} /> Print</button>
+                        <button className="btn btn-primary" onClick={handlePrint}><Printer size={15} /> Print</button>
                         <button className="btn btn-ghost" onClick={() => setSelectedBill(null)}>Close</button>
                     </div>
                 }>
                     <div className="no-print">
                         <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                            <div><strong>Date:</strong> {new Date(selectedBill.bill_date).toLocaleDateString('en-IN')}</div>
-                            <div><strong>Customer ID:</strong> {selectedBill.customer_id || 'Walk-in'}</div>
+                            <div>
+                                <strong>Customer:</strong> {printCustomer?.name || 'Walk-in Customer'}
+                                {printCustomer?.address ? `, ${printCustomer.address}` : ''}
+                            </div>
+                            <div><strong>Date:</strong> {formatDisplayDate(selectedBill.bill_date)}</div>
                         </div>
                         <table className="data-table">
                             <thead>
@@ -629,97 +663,101 @@ export default function Sales() {
             {/* Hidden Printable Invoice */}
             {selectedBill && settings && (
                 <div className="printable-area">
-                    <div style={{ padding: '40px', color: '#000', background: '#fff' }}>
-                        <div style={{ textAlign: 'center', marginBottom: '30px', borderBottom: '2px solid #333', paddingBottom: '20px' }}>
-                            <h1 style={{ margin: 0, fontSize: '28px', color: '#000' }}>{settings.company_name}</h1>
-                            {settings.tagline && <p style={{ margin: '5px 0', fontSize: '14px', fontStyle: 'italic' }}>{settings.tagline}</p>}
-                            <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>
+                    <div style={{ padding: '22px 26px', color: '#000', background: '#fff', fontSize: '12px', lineHeight: 1.25 }}>
+                        <div style={{ textAlign: 'center', marginBottom: '14px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>
+                            <h1 style={{ margin: 0, fontSize: '22px', color: '#000', lineHeight: 1.1 }}>{settings.company_name}</h1>
+                            {settings.tagline && <p style={{ margin: '3px 0', fontSize: '12px', fontStyle: 'italic' }}>{settings.tagline}</p>}
+                            <p style={{ margin: '3px 0 0 0', fontSize: '11px' }}>
                                 {settings.address}, {settings.city}, {settings.state} - {settings.pincode}
                             </p>
-                            <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>
+                            <p style={{ margin: '3px 0 0 0', fontSize: '11px' }}>
                                 Ph: {settings.phone} | Email: {settings.email}
                             </p>
                             {settings.gst_number && (
-                                <p style={{ margin: '5px 0 0 0', fontSize: '14px', fontWeight: 'bold' }}>
+                                <p style={{ margin: '3px 0 0 0', fontSize: '11px', fontWeight: 'bold' }}>
                                     GSTIN: {settings.gst_number}
                                 </p>
                             )}
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>
+                        <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                            <div style={{ fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Tax Invoice</div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '18px', marginBottom: '14px' }}>
                             <div>
-                                <h3 style={{ margin: '0 0 10px 0', color: '#666', fontSize: '14px', textTransform: 'uppercase' }}>Tax Invoice</h3>
-                                <div style={{ fontSize: '16px', fontWeight: 'bold', margin: '0 0 5px 0' }}>Bill No: {selectedBill.bill_number}</div>
-                                <div>Date: {new Date(selectedBill.bill_date).toLocaleDateString('en-IN')}</div>
+                                <div style={{ fontSize: '11px', color: '#555', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Customer Details</div>
+                                <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '3px' }}>{printCustomer?.name || 'Walk-in Customer'}</div>
+                                {printCustomer?.address && <div style={{ marginBottom: '3px' }}>{printCustomer.address}</div>}
+                                {printCustomer?.phone && <div>Phone: {printCustomer.phone}</div>}
                             </div>
-                            <div style={{ textAlign: 'right' }}>
-                                <h3 style={{ margin: '0 0 10px 0', color: '#666', fontSize: '14px', textTransform: 'uppercase' }}>Billed To</h3>
-                                <div style={{ fontWeight: 'bold' }}>
-                                    {selectedBill.customer_id ? `Customer ID: ${selectedBill.customer_id}` : 'Walk-in Customer'}
-                                </div>
+                            <div style={{ textAlign: 'right', minWidth: '180px' }}>
+                                <div style={{ fontSize: '11px', color: '#555', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Bill Details</div>
+                                <div style={{ fontWeight: 'bold', marginBottom: '3px' }}>Bill No: {selectedBill.bill_number}</div>
+                                <div>Date: {formatDisplayDate(selectedBill.bill_date)}</div>
                             </div>
                         </div>
 
-                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '14px' }}>
                             <thead>
                                 <tr style={{ background: '#f5f5f5' }}>
-                                    <th style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'left' }}>S.N.</th>
-                                    <th style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'left' }}>Description</th>
-                                    <th style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'center' }}>Qty</th>
-                                    <th style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'right' }}>M.R.P.</th>
-                                    <th style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'right' }}>Amount</th>
+                                    <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'left' }}>S.N.</th>
+                                    <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'left' }}>Description</th>
+                                    <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'center' }}>Qty</th>
+                                    <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'right' }}>M.R.P.</th>
+                                    <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'right' }}>Amount</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {selectedBill.sales_items?.map((it, idx) => (
                                     <tr key={it.id}>
-                                        <td style={{ padding: '10px', border: '1px solid #ccc' }}>{idx + 1}</td>
-                                        <td style={{ padding: '10px', border: '1px solid #ccc' }}>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', verticalAlign: 'top' }}>{idx + 1}</td>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc' }}>
                                             Product ID: {it.product_id}
-                                            <div style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>
+                                            <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>
                                                 HSN: — | GST: {it.gst_percent}% | Disc: {it.discount_percent}%
                                             </div>
                                         </td>
-                                        <td style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'center' }}>{it.quantity}</td>
-                                        <td style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'right' }}>{it.selling_price.toFixed(2)}</td>
-                                        <td style={{ padding: '10px', border: '1px solid #ccc', textAlign: 'right' }}>{it.final_amount.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'center', verticalAlign: 'top' }}>{it.quantity}</td>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'right', verticalAlign: 'top' }}>{it.selling_price.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'right', verticalAlign: 'top' }}>{it.final_amount.toFixed(2)}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
 
                         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                            <table style={{ width: '350px', borderCollapse: 'collapse' }}>
+                            <table style={{ width: '300px', borderCollapse: 'collapse' }}>
                                 <tbody>
                                     <tr>
-                                        <td style={{ padding: '8px', textAlign: 'right' }}>Subtotal:</td>
-                                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.subtotal.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right' }}>Subtotal:</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.subtotal.toFixed(2)}</td>
                                     </tr>
                                     {selectedBill.discount_amount > 0 && (
                                         <tr>
-                                            <td style={{ padding: '8px', textAlign: 'right' }}>Discount:</td>
-                                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>-₹{selectedBill.discount_amount.toFixed(2)}</td>
+                                            <td style={{ padding: '5px 6px', textAlign: 'right' }}>Discount:</td>
+                                            <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 'bold' }}>-₹{selectedBill.discount_amount.toFixed(2)}</td>
                                         </tr>
                                     )}
                                     <tr>
-                                        <td style={{ padding: '8px', textAlign: 'right' }}>Taxable Value:</td>
-                                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.taxable_amount.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right' }}>Taxable Value:</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.taxable_amount.toFixed(2)}</td>
                                     </tr>
                                     <tr>
-                                        <td style={{ padding: '8px', textAlign: 'right' }}>CGST:</td>
-                                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.cgst_amount.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right' }}>CGST:</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.cgst_amount.toFixed(2)}</td>
                                     </tr>
                                     <tr>
-                                        <td style={{ padding: '8px', textAlign: 'right' }}>SGST:</td>
-                                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.sgst_amount.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right' }}>SGST:</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.sgst_amount.toFixed(2)}</td>
                                     </tr>
                                     <tr style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000' }}>
-                                        <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '18px', fontWeight: 'bold' }}>Grand Total:</td>
-                                        <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '18px', fontWeight: 'bold' }}>₹{selectedBill.grand_total.toFixed(2)}</td>
+                                        <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: '15px', fontWeight: 'bold' }}>Grand Total:</td>
+                                        <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: '15px', fontWeight: 'bold' }}>₹{selectedBill.grand_total.toFixed(2)}</td>
                                     </tr>
                                     {selectedBill.payment_mode && (
                                         <tr>
-                                            <td colSpan="2" style={{ padding: '8px', textAlign: 'right', fontStyle: 'italic' }}>
+                                            <td colSpan="2" style={{ padding: '5px 6px', textAlign: 'right', fontStyle: 'italic' }}>
                                                 Paid via {selectedBill.payment_mode}
                                             </td>
                                         </tr>
@@ -729,11 +767,11 @@ export default function Sales() {
                         </div>
 
                         {settings.invoice_footer && (
-                            <div style={{ marginTop: '50px', paddingTop: '20px', borderTop: '1px solid #eee', fontSize: '12px', textAlign: 'center', color: '#555' }}>
+                            <div style={{ marginTop: '18px', paddingTop: '10px', borderTop: '1px solid #eee', fontSize: '11px', textAlign: 'center', color: '#555' }}>
                                 {settings.invoice_footer}
                             </div>
                         )}
-                        <div style={{ marginTop: '30px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', paddingRight: '20px' }}>
+                        <div style={{ marginTop: '18px', textAlign: 'right', fontSize: '12px', fontWeight: 'bold', paddingRight: '8px' }}>
                             Authorized Signatory
                         </div>
                     </div>
