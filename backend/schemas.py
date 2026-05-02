@@ -205,6 +205,7 @@ class SaleItemResponse(SaleItemCreate):
 class SalesBillCreate(BaseModel):
     customer_id: Optional[int] = None
     bill_number: str
+    bill_date: Optional[date] = None
     subtotal: float
     discount_amount: float = 0
     taxable_amount: float
