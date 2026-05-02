@@ -19,6 +19,13 @@ function getProductDisplayName(product) {
     return [product.brand_name, product.product_name].filter(Boolean).join(' ');
 }
 
+function getSaleItemDisplayName(item) {
+    if (item?.product) {
+        return getProductDisplayName(item.product);
+    }
+    return item?.product_id ? `Product #${item.product_id}` : 'Unknown Product';
+}
+
 function matchesProductSearch(product, rawQuery) {
     const query = normalizeText(rawQuery);
     if (!query) return false;
@@ -640,9 +647,9 @@ export default function Sales() {
                         <table className="data-table">
                             <thead>
                                 <tr>
-                                    <th>Product ID</th>
+                                    <th>Product Name</th>
                                     <th>Qty</th>
-                                    <th>M.R.P</th>
+                                    <th>Rate</th>
                                     <th>Disc%</th>
                                     <th>GST%</th>
                                     <th style={{ textAlign: 'right' }}>Total</th>
@@ -651,7 +658,7 @@ export default function Sales() {
                             <tbody>
                                 {selectedBill.sales_items?.map(it => (
                                     <tr key={it.id}>
-                                        <td>{it.product_id}</td>
+                                        <td>{getSaleItemDisplayName(it)}</td>
                                         <td>{it.quantity}</td>
                                         <td>₹{it.selling_price.toFixed(2)}</td>
                                         <td>{it.discount_percent}%</td>
@@ -719,7 +726,7 @@ export default function Sales() {
                                     <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'left' }}>S.N.</th>
                                     <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'left' }}>Description</th>
                                     <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'center' }}>Qty</th>
-                                    <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'right' }}>M.R.P.</th>
+                                    <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'right' }}>Rate</th>
                                     <th style={{ padding: '6px 7px', border: '1px solid #ccc', textAlign: 'right' }}>Amount</th>
                                 </tr>
                             </thead>
@@ -728,7 +735,7 @@ export default function Sales() {
                                     <tr key={it.id}>
                                         <td style={{ padding: '5px 7px', border: '1px solid #ccc', verticalAlign: 'top' }}>{idx + 1}</td>
                                         <td style={{ padding: '5px 7px', border: '1px solid #ccc' }}>
-                                            Product ID: {it.product_id}
+                                            {getSaleItemDisplayName(it)}
                                             <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>
                                                 HSN: — | GST: {it.gst_percent}% | Disc: {it.discount_percent}%
                                             </div>
