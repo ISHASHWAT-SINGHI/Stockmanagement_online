@@ -87,7 +87,10 @@ from sqlalchemy.orm import selectinload
 async def get_sale(bill_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(models.SalesBill)
-        .options(selectinload(models.SalesBill.sales_items))
+        .options(
+            selectinload(models.SalesBill.sales_items),
+            selectinload(models.SalesBill.customer),
+        )
         .where(models.SalesBill.id == bill_id)
     )
     bill = result.scalar_one_or_none()
