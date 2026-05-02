@@ -91,7 +91,7 @@ async def get_sale(bill_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(models.SalesBill)
         .options(
-            selectinload(models.SalesBill.sales_items),
+            selectinload(models.SalesBill.sales_items).selectinload(models.SaleItem.product),
             selectinload(models.SalesBill.customer),
         )
         .where(models.SalesBill.id == bill_id)

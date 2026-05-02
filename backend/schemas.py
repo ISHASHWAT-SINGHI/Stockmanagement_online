@@ -199,6 +199,7 @@ class SaleItemCreate(BaseModel):
 class SaleItemResponse(SaleItemCreate):
     id: int
     bill_id: int
+    product: Optional[ProductResponse] = None
     class Config:
         from_attributes = True
 
