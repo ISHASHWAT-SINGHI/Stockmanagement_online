@@ -68,6 +68,14 @@ function calcBill(items, discountAmt, isDiscountPercent) {
     };
 }
 
+function getTodayInputValue() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 export default function Sales() {
     const { addToast } = useToast();
     const [products, setProducts] = useState([]);
@@ -78,6 +86,7 @@ export default function Sales() {
     // Bill form state
     const [customerId, setCustomerId] = useState('');
     const [customerSearch, setCustomerSearch] = useState('');
+    const [billDate, setBillDate] = useState(getTodayInputValue());
     const [items, setItems] = useState([emptyItem()]);
     
     const [discountAmt, setDiscountAmt] = useState(0);
@@ -294,6 +303,7 @@ export default function Sales() {
         try {
             await createSale({
                 customer_id: customerId || null,
+                ...(billDate ? { bill_date: billDate } : {}),
                 bill_number: nextBillNo,
                 subtotal: billTotals.subtotal,
                 discount_amount: billTotals.extraDiscountValue,
@@ -318,6 +328,7 @@ export default function Sales() {
             addToast(`Bill ${nextBillNo} saved!`, 'success');
             // Reset form
             setItems([emptyItem()]); setCustomerId(''); setCustomerSearch('');
+            setBillDate(getTodayInputValue());
             setDiscountAmt(0); setPaidAmt(''); setIsDiscountPercent(false);
             load();
         } catch (e) {
@@ -525,6 +536,10 @@ export default function Sales() {
                     {/* Bill Summary Panel */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'sticky', top: 0 }}>
                         <div className="surface" style={{ padding: '1.25rem' }}>
+                            <div className="form-group" style={{ marginBottom: '1rem' }}>
+                                <label className="form-label">Bill Date</label>
+                                <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)} />
+                            </div>
                             <p style={{ fontWeight: 700, marginBottom: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Bill Summary</p>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.875rem' }}>
                                 {[

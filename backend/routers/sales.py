@@ -1,4 +1,5 @@
 """routers/sales.py — Sales bill and payment endpoints."""
+from datetime import datetime, time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -25,7 +26,9 @@ async def get_sales(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(
 @router.post("/sales", response_model=schemas.SalesBillResponse)
 async def create_sale(bill: schemas.SalesBillCreate, db: AsyncSession = Depends(get_db)):
     items_data = bill.items
-    bill_dict = bill.model_dump(exclude={"items"})
+    bill_dict = bill.model_dump(exclude={"items"}, exclude_none=True)
+    if bill.bill_date is not None:
+        bill_dict["bill_date"] = datetime.combine(bill.bill_date, time.min)
 
     try:
         db_bill = models.SalesBill(**bill_dict)
