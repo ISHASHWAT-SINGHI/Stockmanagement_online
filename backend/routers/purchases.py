@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from typing import List
 
 import models
@@ -12,10 +13,17 @@ from security import get_current_user
 router = APIRouter(prefix="/api/v1", tags=["purchases"], dependencies=[Depends(get_current_user)])
 
 
+def get_product_display_name(product: models.Product | None) -> str:
+    if not product:
+        return "Unknown Product"
+    return " ".join(part for part in [product.brand_name, product.product_name] if part).strip() or f"Product #{product.id}"
+
+
 @router.get("/purchase-invoices", response_model=List[schemas.PurchaseInvoiceResponse])
 async def get_purchase_invoices(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(models.PurchaseInvoice)
+        .options(selectinload(models.PurchaseInvoice.purchase_items))
         .where(models.PurchaseInvoice.is_deleted == False)
         .offset(skip).limit(limit)
     )
@@ -33,7 +41,12 @@ async def create_purchase_invoice(invoice: schemas.PurchaseInvoiceCreate, db: As
         await db.flush()
 
         for item in items_data:
-            db_item = models.PurchaseItem(**item.model_dump(), invoice_id=db_invoice.id)
+            product = await db.get(models.Product, item.product_id)
+            db_item = models.PurchaseItem(
+                **item.model_dump(),
+                invoice_id=db_invoice.id,
+                product_name_snapshot=get_product_display_name(product),
+            )
             db.add(db_item)
 
             db_batch = models.StockBatch(
@@ -67,14 +80,14 @@ async def create_purchase_invoice(invoice: schemas.PurchaseInvoiceCreate, db: As
     await db.refresh(db_invoice)
     return db_invoice
 
-
-from sqlalchemy.orm import selectinload
-
 @router.get("/purchase-invoices/{invoice_id}", response_model=schemas.PurchaseInvoiceDetailResponse)
 async def get_purchase_invoice(invoice_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(models.PurchaseInvoice)
-        .options(selectinload(models.PurchaseInvoice.purchase_items))
+        .options(
+            selectinload(models.PurchaseInvoice.purchase_items)
+            .selectinload(models.PurchaseItem.product)
+        )
         .where(models.PurchaseInvoice.id == invoice_id)
     )
     invoice = result.scalar_one_or_none()

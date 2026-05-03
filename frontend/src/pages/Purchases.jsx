@@ -17,6 +17,12 @@ function getProductDisplayName(product) {
     return [product.brand_name, product.product_name].filter(Boolean).join(' ');
 }
 
+function getPurchaseItemDisplayName(item) {
+    if (item?.product_name_snapshot) return item.product_name_snapshot;
+    if (item?.product) return getProductDisplayName(item.product);
+    return item?.product_id ? `Product #${item.product_id}` : 'Unknown Product';
+}
+
 function matchesProductSearch(product, rawQuery) {
     const query = normalizeText(rawQuery);
     if (!query) return false;
@@ -240,6 +246,7 @@ export default function Purchases() {
     };
 
     const totalAmount = items.reduce((s, it) => s + (it.line_total || 0), 0);
+    const totalQuantity = items.filter(it => it.product_id).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
     const resolveItemsForSave = () => items.map(it => {
         if (it.product_id || !it.product_name?.trim()) return it;
         const exactMatch = findExactProductMatch(products, it.product_name);
@@ -479,6 +486,10 @@ export default function Purchases() {
                                 </div>
                             ))}
                         </div>
+                        <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                            <span>Total Qty</span>
+                            <span>{totalQuantity}</span>
+                        </div>
                         <div style={{ borderTop: '1px solid var(--border)', marginTop: '0.75rem', paddingTop: '0.75rem', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.1rem' }}>
                             <span>Total</span>
                             <span style={{ color: 'var(--accent)' }}>₹{totalAmount.toFixed(2)}</span>
@@ -500,7 +511,7 @@ export default function Purchases() {
                     <table className="data-table">
                         <thead>
                             <tr>
-                                <th>Product ID</th>
+                                <th>Product Name</th>
                                 <th>Qty</th>
                                 <th>Unit Price</th>
                                 <th>GST%</th>
@@ -510,7 +521,7 @@ export default function Purchases() {
                         <tbody>
                             {selectedInvoice.purchase_items?.map(it => (
                                 <tr key={it.id}>
-                                    <td>{it.product_id}</td>
+                                    <td>{getPurchaseItemDisplayName(it)}</td>
                                     <td>{it.quantity}</td>
                                     <td>₹{it.unit_price.toFixed(2)}</td>
                                     <td>{it.gst_percent}%</td>
@@ -519,6 +530,9 @@ export default function Purchases() {
                             ))}
                         </tbody>
                     </table>
+                    <div style={{ marginTop: '1rem', textAlign: 'right', fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        Total Qty: {selectedInvoice.total_quantity ?? selectedInvoice.purchase_items?.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)}
+                    </div>
                     <div style={{ marginTop: '1rem', textAlign: 'right', fontSize: '1.2rem', fontWeight: 'bold' }}>
                         Grand Total: <span style={{ color: 'var(--accent)' }}>₹{selectedInvoice.total_amount.toFixed(2)}</span>
                     </div>

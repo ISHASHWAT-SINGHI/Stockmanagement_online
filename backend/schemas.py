@@ -140,6 +140,8 @@ class PurchaseItemCreate(BaseModel):
 class PurchaseItemResponse(PurchaseItemCreate):
     id: int
     invoice_id: int
+    product_name_snapshot: Optional[str] = None
+    product: Optional[ProductResponse] = None
     class Config:
         from_attributes = True
 
@@ -157,6 +159,7 @@ class PurchaseInvoiceResponse(BaseModel):
     invoice_date: date
     total_amount: float
     created_at: datetime
+    total_quantity: int = 0
     class Config:
         from_attributes = True
 
@@ -189,23 +192,33 @@ class StockBatchResponse(StockBatchCreate):
 
 class SaleItemCreate(BaseModel):
     product_id: int
-    stock_batch_id: int
     quantity: int
     selling_price: float
     gst_percent: float
     discount_percent: float = 0
     final_amount: float
+    stock_batch_id: Optional[int] = None
+
+
+class SaleItemBatchAllocationResponse(BaseModel):
+    id: int
+    stock_batch_id: int
+    quantity: int
+    class Config:
+        from_attributes = True
 
 class SaleItemResponse(SaleItemCreate):
     id: int
     bill_id: int
+    product_name_snapshot: Optional[str] = None
     product: Optional[ProductResponse] = None
+    batch_allocations: List[SaleItemBatchAllocationResponse] = []
     class Config:
         from_attributes = True
 
 class SalesBillCreate(BaseModel):
     customer_id: Optional[int] = None
-    bill_number: str
+    bill_number: Optional[str] = None
     bill_date: Optional[date] = None
     subtotal: float
     discount_amount: float = 0
@@ -234,6 +247,12 @@ class SalesBillResponse(BaseModel):
     outstanding_amount: float
     payment_status: str
     payment_mode: Optional[str] = None
+    financial_year: Optional[str] = None
+    bill_sequence: Optional[int] = None
+    revision_number: int = 1
+    edited_at: Optional[datetime] = None
+    edited_by: Optional[str] = None
+    total_quantity: int = 0
     class Config:
         from_attributes = True
 
