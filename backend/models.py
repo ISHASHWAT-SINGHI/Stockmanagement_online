@@ -129,6 +129,7 @@ class PurchaseInvoice(TimestampMixin, SoftDeleteMixin, Base):
     id = Column(Integer, primary_key=True, index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"))
     invoice_number = Column(String)
+    client_request_id = Column(String, unique=True, index=True)
     invoice_date = Column(Date)
     total_amount = Column(Float)
 

@@ -86,6 +86,11 @@ function getApiErrorMessage(error, fallback) {
     return error?.response?.data?.detail || error?.message || fallback;
 }
 
+function createClientRequestId() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    return `purchase-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function Purchases() {
     const { addToast } = useToast();
     const [products, setProducts] = useState([]);
@@ -108,6 +113,9 @@ export default function Purchases() {
     
     const itemRefs = useRef([]);
     const productInputRefs = useRef([]);
+    const saveInFlightRef = useRef(false);
+    const purchaseRequestKeyRef = useRef('');
+    const purchaseDraftFingerprintRef = useRef('');
 
     const load = useCallback(async () => {
         const [productsResult, suppliersResult, invoicesResult] = await Promise.allSettled([
@@ -301,6 +309,8 @@ export default function Purchases() {
     };
 
     const saveInvoice = async () => {
+        if (saving || saveInFlightRef.current) return;
+
         const matchedSupplier = supplierId
             ? suppliers.find(s => s.id === Number(supplierId))
             : commitSupplierMatch(supplierSearch);
@@ -316,23 +326,41 @@ export default function Purchases() {
         const validItems = preparedItems.filter(it => it.product_id && it.quantity > 0);
         if (validItems.length === 0) { addToast('Add at least one mapped product (select from suggestion)', 'error'); return; }
         const invoiceTotal = validItems.reduce((sum, item) => sum + (item.line_total || 0), 0);
+        const payload = {
+            supplier_id: matchedSupplier.id,
+            invoice_number: invoiceNo,
+            invoice_date: invoiceDate,
+            total_amount: +invoiceTotal.toFixed(2),
+            items: validItems.map(getPurchasePayloadItem),
+        };
+        const draftFingerprint = JSON.stringify(payload);
+        if (!purchaseRequestKeyRef.current || purchaseDraftFingerprintRef.current !== draftFingerprint) {
+            purchaseRequestKeyRef.current = createClientRequestId();
+            purchaseDraftFingerprintRef.current = draftFingerprint;
+        }
         
+        saveInFlightRef.current = true;
         setSaving(true);
         try {
-            await createPurchaseInvoice({
-                supplier_id: matchedSupplier.id,
-                invoice_number: invoiceNo,
-                invoice_date: invoiceDate,
-                total_amount: +invoiceTotal.toFixed(2),
-                items: validItems.map(getPurchasePayloadItem),
+            await createPurchaseInvoice(payload, {
+                headers: {
+                    'X-Idempotency-Key': purchaseRequestKeyRef.current,
+                },
             });
             addToast('Purchase invoice saved!', 'success');
             setItems([emptyItem()]); setSupplierId(''); setSupplierSearch('');
             setInvoiceNo(''); setInvoiceDate(new Date().toISOString().slice(0, 10));
+            purchaseRequestKeyRef.current = '';
+            purchaseDraftFingerprintRef.current = '';
             load();
         } catch (e) {
-            addToast(e?.response?.data?.detail || 'Save failed', 'error');
-        } finally { setSaving(false); }
+            const message = e?.response?.data?.detail || 'Save failed';
+            const requestId = e?.response?.headers?.['x-request-id'];
+            addToast(requestId ? `${message} (Ref: ${requestId})` : message, 'error');
+        } finally {
+            saveInFlightRef.current = false;
+            setSaving(false);
+        }
     };
 
     return (
