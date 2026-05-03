@@ -28,12 +28,14 @@ export default function Sidebar() {
 
     return (
         <aside
+            className="scrollbar"
             style={{
-                width: collapsed ? 'var(--sidebar-w-sm)' : 'var(--sidebar-w)',
-                transition: 'width var(--transition)',
+                width: collapsed ? 'var(--sidebar-width-compact)' : 'var(--sidebar-width)',
+                transition: 'width var(--duration-normal) var(--ease-standard)',
                 flexShrink: 0,
-                background: 'var(--bg-surface)',
-                borderRight: '1px solid var(--border)',
+                background: 'linear-gradient(180deg, color-mix(in oklch, var(--surface-2) 92%, black 8%), var(--surface-1))',
+                borderRight: '1px solid var(--line-soft)',
+                boxShadow: '18px 0 42px rgb(0 0 0 / 0.16)',
                 display: 'flex',
                 flexDirection: 'column',
                 height: '100%',
@@ -46,13 +48,14 @@ export default function Sidebar() {
             <div style={{
                 display: 'flex', alignItems: 'center', gap: '0.6rem',
                 padding: '1.1rem 1rem',
-                borderBottom: '1px solid var(--border)',
+                borderBottom: '1px solid var(--line-soft)',
                 minHeight: '56px',
                 overflow: 'hidden',
             }}>
                 <div style={{
                     width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    background: 'linear-gradient(135deg, var(--brand), var(--ledger))',
+                    boxShadow: 'var(--glow-brand)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                     <BarChart3 size={18} color="#fff" />
@@ -60,7 +63,7 @@ export default function Sidebar() {
                 {!collapsed && (
                     <span className="sidebar-logo-text" style={{
                         fontWeight: 700, fontSize: '1rem',
-                        background: 'linear-gradient(90deg, #6366f1, #a78bfa)',
+                        background: 'linear-gradient(90deg, var(--text-strong), color-mix(in oklch, var(--brand) 72%, var(--ledger)))',
                         WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
                         whiteSpace: 'nowrap',
                     }}>
@@ -81,18 +84,19 @@ export default function Sidebar() {
                             style={{
                                 display: 'flex', alignItems: 'center', gap: '0.65rem',
                                 padding: collapsed ? '0.7rem' : '0.65rem 0.8rem',
-                                borderRadius: 9,
-                                marginBottom: '0.2rem',
+                                borderRadius: 12,
+                                marginBottom: '0.3rem',
                                 textDecoration: 'none',
                                 justifyContent: collapsed ? 'center' : 'flex-start',
-                                background: isActive ? 'var(--accent-light)' : 'transparent',
-                                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                                borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                                transition: 'all var(--transition)',
+                                background: isActive ? 'linear-gradient(90deg, color-mix(in oklch, var(--brand) 14%, transparent), color-mix(in oklch, var(--ledger) 8%, transparent))' : 'transparent',
+                                color: isActive ? 'var(--text-strong)' : 'var(--text-secondary)',
+                                border: isActive ? '1px solid color-mix(in oklch, var(--brand) 32%, var(--line))' : '1px solid transparent',
+                                transition: 'all var(--duration-normal) var(--ease-standard)',
                                 fontWeight: isActive ? 600 : 400,
                                 fontSize: '0.875rem',
+                                boxShadow: isActive ? '0 10px 24px rgb(0 0 0 / 0.16)' : 'none',
                             }}
-                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'color-mix(in oklch, var(--surface-3) 92%, transparent)'; }}
                             onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
                         >
                             <Icon size={18} style={{ flexShrink: 0 }} />
@@ -114,12 +118,12 @@ export default function Sidebar() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     margin: '0.5rem 0.6rem 0.75rem',
                     padding: '0.5rem',
-                    borderRadius: 9,
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border)',
+                    borderRadius: 12,
+                    background: 'color-mix(in oklch, var(--surface-2) 84%, black 16%)',
+                    border: '1px solid var(--line-soft)',
                     color: 'var(--text-muted)',
                     cursor: 'pointer',
-                    transition: 'all var(--transition)',
+                    transition: 'all var(--duration-normal) var(--ease-standard)',
                 }}
             >
                 {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}

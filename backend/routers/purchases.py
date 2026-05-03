@@ -19,6 +19,44 @@ def get_product_display_name(product: models.Product | None) -> str:
     return " ".join(part for part in [product.brand_name, product.product_name] if part).strip() or f"Product #{product.id}"
 
 
+async def get_supplier_or_404(db: AsyncSession, supplier_id: int) -> models.Supplier:
+    result = await db.execute(
+        select(models.Supplier).where(
+            models.Supplier.id == supplier_id,
+            models.Supplier.is_deleted == False,
+        )
+    )
+    supplier = result.scalar_one_or_none()
+    if not supplier:
+        raise HTTPException(status_code=404, detail=f"Supplier {supplier_id} not found")
+    return supplier
+
+
+async def get_product_or_404(db: AsyncSession, product_id: int) -> models.Product:
+    result = await db.execute(
+        select(models.Product).where(
+            models.Product.id == product_id,
+            models.Product.is_deleted == False,
+        )
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+    return product
+
+
+async def load_purchase_invoice(db: AsyncSession, invoice_id: int) -> models.PurchaseInvoice | None:
+    result = await db.execute(
+        select(models.PurchaseInvoice)
+        .options(
+            selectinload(models.PurchaseInvoice.purchase_items)
+            .selectinload(models.PurchaseItem.product)
+        )
+        .where(models.PurchaseInvoice.id == invoice_id)
+    )
+    return result.scalar_one_or_none()
+
+
 @router.get("/purchase-invoices", response_model=List[schemas.PurchaseInvoiceResponse])
 async def get_purchase_invoices(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -36,12 +74,13 @@ async def create_purchase_invoice(invoice: schemas.PurchaseInvoiceCreate, db: As
     invoice_dict = invoice.model_dump(exclude={"items"})
 
     try:
+        await get_supplier_or_404(db, invoice.supplier_id)
         db_invoice = models.PurchaseInvoice(**invoice_dict)
         db.add(db_invoice)
         await db.flush()
 
         for item in items_data:
-            product = await db.get(models.Product, item.product_id)
+            product = await get_product_or_404(db, item.product_id)
             db_item = models.PurchaseItem(
                 **item.model_dump(),
                 invoice_id=db_invoice.id,
@@ -60,10 +99,7 @@ async def create_purchase_invoice(invoice: schemas.PurchaseInvoiceCreate, db: As
             )
             db.add(db_batch)
 
-            prod_result = await db.execute(select(models.Product).where(models.Product.id == item.product_id))
-            product = prod_result.scalar_one_or_none()
-            if product:
-                product.current_stock += item.quantity
+            product.current_stock = (product.current_stock or 0) + item.quantity
 
             db.add(models.StockLedger(
                 product_id=item.product_id,
@@ -73,24 +109,21 @@ async def create_purchase_invoice(invoice: schemas.PurchaseInvoiceCreate, db: As
             ))
 
         await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
         await db.rollback()
         raise e
 
-    await db.refresh(db_invoice)
-    return db_invoice
+    created_invoice = await load_purchase_invoice(db, db_invoice.id)
+    if not created_invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found after creation")
+    return created_invoice
 
 @router.get("/purchase-invoices/{invoice_id}", response_model=schemas.PurchaseInvoiceDetailResponse)
 async def get_purchase_invoice(invoice_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(models.PurchaseInvoice)
-        .options(
-            selectinload(models.PurchaseInvoice.purchase_items)
-            .selectinload(models.PurchaseItem.product)
-        )
-        .where(models.PurchaseInvoice.id == invoice_id)
-    )
-    invoice = result.scalar_one_or_none()
+    invoice = await load_purchase_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return invoice
