@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Plus, Trash2, ShoppingCart, Save, CheckCircle, Eye, Printer } from 'lucide-react';
-import { getProducts, getCustomers, getStockBatchesForProduct, createSale, getSales, getSale, getBusinessSettings } from '../api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { CheckCircle, Eye, Pencil, Plus, Printer, Save, ShoppingCart, Trash2 } from 'lucide-react';
+import { createSale, getBusinessSettings, getCustomers, getProducts, getSale, getSales, updateSale } from '../api';
 import { useKeyboardShortcut } from '../hooks/useKeyboard';
 import { useToast } from '../hooks/useToast';
 import Modal from '../components/Modal';
@@ -8,7 +8,16 @@ import Modal from '../components/Modal';
 const GST_RATES = [0, 5, 12, 18, 28];
 
 function emptyItem() {
-    return { product_id: '', stock_batch_id: '', product_name: '', quantity: 1, selling_price: 0, gst_percent: 12, discount_percent: 0, final_amount: 0, available: 0 };
+    return {
+        product_id: '',
+        product_name: '',
+        quantity: 1,
+        selling_price: 0,
+        gst_percent: 12,
+        discount_percent: 0,
+        final_amount: 0,
+        available: 0,
+    };
 }
 
 function normalizeText(value = '') {
@@ -16,13 +25,12 @@ function normalizeText(value = '') {
 }
 
 function getProductDisplayName(product) {
-    return [product.brand_name, product.product_name].filter(Boolean).join(' ');
+    return [product?.brand_name, product?.product_name].filter(Boolean).join(' ');
 }
 
 function getSaleItemDisplayName(item) {
-    if (item?.product) {
-        return getProductDisplayName(item.product);
-    }
+    if (item?.product_name_snapshot) return item.product_name_snapshot;
+    if (item?.product) return getProductDisplayName(item.product);
     return item?.product_id ? `Product #${item.product_id}` : 'Unknown Product';
 }
 
@@ -47,31 +55,33 @@ function findExactProductMatch(products, rawQuery) {
     return matches.length === 1 ? matches[0] : null;
 }
 
-function calcItem(it) {
-    const base = it.selling_price * it.quantity;
-    const afterDiscount = base - (base * it.discount_percent / 100);
-    const gstAmt = afterDiscount * it.gst_percent / 100;
-    return { ...it, final_amount: +(afterDiscount + gstAmt).toFixed(2) };
+function calcItem(item) {
+    const base = item.selling_price * item.quantity;
+    const afterDiscount = base - (base * item.discount_percent / 100);
+    const gstAmount = afterDiscount * item.gst_percent / 100;
+    return { ...item, final_amount: +(afterDiscount + gstAmount).toFixed(2) };
 }
 
 function calcBill(items, discountAmt, isDiscountPercent) {
-    const subtotal = items.reduce((s, i) => s + (i.selling_price * i.quantity), 0);
-    const taxable = items.reduce((s, i) => s + i.selling_price * i.quantity * (1 - i.discount_percent / 100), 0);
-    const gstTotal = items.reduce((s, i) => s + i.selling_price * i.quantity * (1 - i.discount_percent / 100) * i.gst_percent / 100, 0);
-    
-    // Apply extra discount
+    const subtotal = items.reduce((sum, item) => sum + (item.selling_price * item.quantity), 0);
+    const taxable = items.reduce((sum, item) => (
+        sum + item.selling_price * item.quantity * (1 - item.discount_percent / 100)
+    ), 0);
+    const gstTotal = items.reduce((sum, item) => (
+        sum + item.selling_price * item.quantity * (1 - item.discount_percent / 100) * item.gst_percent / 100
+    ), 0);
     const extraDiscountValue = isDiscountPercent ? (taxable + gstTotal) * (discountAmt / 100) : discountAmt;
     const grandExact = taxable + gstTotal - (extraDiscountValue || 0);
     const grandRounded = Math.round(grandExact);
-    
-    return { 
-        subtotal: +subtotal.toFixed(2), 
-        taxable: +taxable.toFixed(2), 
-        cgst: +(gstTotal / 2).toFixed(2), 
-        sgst: +(gstTotal / 2).toFixed(2), 
+
+    return {
+        subtotal: +subtotal.toFixed(2),
+        taxable: +taxable.toFixed(2),
+        cgst: +(gstTotal / 2).toFixed(2),
+        sgst: +(gstTotal / 2).toFixed(2),
         grandExact: +grandExact.toFixed(2),
         grand: grandRounded,
-        extraDiscountValue: +extraDiscountValue.toFixed(2)
+        extraDiscountValue: +extraDiscountValue.toFixed(2),
     };
 }
 
@@ -83,48 +93,82 @@ function getTodayInputValue() {
     return `${year}-${month}-${day}`;
 }
 
+function formatInputDate(value) {
+    const date = new Date(value);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getTotalQuantity(items = []) {
+    return items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+}
+
 export default function Sales() {
     const { addToast } = useToast();
     const [products, setProducts] = useState([]);
     const [customers, setCustomers] = useState([]);
     const [bills, setBills] = useState([]);
-    const [view, setView] = useState('new'); 
+    const [view, setView] = useState('new');
+    const [editingBillId, setEditingBillId] = useState(null);
 
-    // Bill form state
     const [customerId, setCustomerId] = useState('');
     const [customerSearch, setCustomerSearch] = useState('');
     const [billDate, setBillDate] = useState(getTodayInputValue());
     const [items, setItems] = useState([emptyItem()]);
-    
     const [discountAmt, setDiscountAmt] = useState(0);
     const [isDiscountPercent, setIsDiscountPercent] = useState(false);
-    
     const [paymentMode, setPaymentMode] = useState('Cash');
     const [paidAmt, setPaidAmt] = useState('');
     const [saving, setSaving] = useState(false);
-    
+
     const [productSuggestions, setProductSuggestions] = useState({ index: null, list: [], activeIdx: -1 });
     const [customerSuggestions, setCustomerSuggestions] = useState([]);
     const [customerSuggestIndex, setCustomerSuggestIndex] = useState(-1);
-    
+
     const [selectedBill, setSelectedBill] = useState(null);
     const [settings, setSettings] = useState(null);
+
     const itemRefs = useRef([]);
     const productInputRefs = useRef([]);
 
     const load = useCallback(async () => {
         try {
-            const [pRes, cRes, sRes, setRes] = await Promise.all([getProducts(), getCustomers(), getSales(), getBusinessSettings()]);
-            setProducts(pRes.data);
-            setCustomers(cRes.data);
-            setBills([...sRes.data].reverse());
-            setSettings(setRes.data);
-        } catch { addToast('Failed to load data', 'error'); }
+            const [productsResponse, customersResponse, salesResponse, settingsResponse] = await Promise.all([
+                getProducts(),
+                getCustomers(),
+                getSales(),
+                getBusinessSettings(),
+            ]);
+            setProducts(productsResponse.data);
+            setCustomers(customersResponse.data);
+            setBills(salesResponse.data);
+            setSettings(settingsResponse.data);
+        } catch {
+            addToast('Failed to load data', 'error');
+        }
     }, [addToast]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        load();
+    }, [load]);
 
-    // Alt+N → add new item row
+    const resetBillForm = useCallback(() => {
+        setEditingBillId(null);
+        setCustomerId('');
+        setCustomerSearch('');
+        setBillDate(getTodayInputValue());
+        setItems([emptyItem()]);
+        setDiscountAmt(0);
+        setIsDiscountPercent(false);
+        setPaymentMode('Cash');
+        setPaidAmt('');
+        setProductSuggestions({ index: null, list: [], activeIdx: -1 });
+        setCustomerSuggestions([]);
+        setCustomerSuggestIndex(-1);
+    }, []);
+
     useKeyboardShortcut('n', () => addRow(true), { alt: true, allowInInput: true });
 
     const focusProductInputAt = (index) => {
@@ -137,217 +181,279 @@ export default function Sales() {
         if (focusProduct) focusProductInputAt(nextIndex);
     };
 
-    const removeRow = (i) => setItems(prev => prev.filter((_, idx) => idx !== i));
+    const removeRow = (index) => {
+        setItems(prev => prev.filter((_, itemIndex) => itemIndex !== index));
+    };
 
-    const updateItem = (i, field, val) => {
+    const updateItem = (index, field, value) => {
         setItems(prev => {
             const next = [...prev];
-            next[i] = calcItem({ ...next[i], [field]: val });
+            next[index] = calcItem({ ...next[index], [field]: value });
             return next;
         });
     };
 
-    // Product search → suggestions
-    const handleProductSearch = (i, val) => {
-        updateItem(i, 'product_name', val);
-        updateItem(i, 'product_id', '');
-        if (val.length < 2) { setProductSuggestions({ index: null, list: [], activeIdx: -1 }); return; }
-        const list = products.filter(p => matchesProductSearch(p, val)).slice(0, 8);
-        setProductSuggestions({ index: i, list, activeIdx: -1 });
-    };
-
-    const applyProductSelection = async (i, product, focusQuantity = true) => {
-        setProductSuggestions({ index: null, list: [], activeIdx: -1 });
-        let batchId = '';
-        let available = 0;
-        try {
-            const r = await getStockBatchesForProduct(product.id);
-            if (r.data.length > 0) { batchId = r.data[0].id; available = r.data[0].available_quantity; }
-        } catch { /* no batches */ }
+    const handleProductSearch = (index, value) => {
         setItems(prev => {
             const next = [...prev];
-            next[i] = calcItem({ ...next[i], product_id: product.id, stock_batch_id: batchId, product_name: getProductDisplayName(product), available });
+            next[index] = calcItem({
+                ...next[index],
+                product_name: value,
+                product_id: '',
+                available: 0,
+            });
+            return next;
+        });
+        if (value.length < 2) {
+            setProductSuggestions({ index: null, list: [], activeIdx: -1 });
+            return;
+        }
+        const list = products.filter(product => matchesProductSearch(product, value)).slice(0, 8);
+        setProductSuggestions({ index, list, activeIdx: -1 });
+    };
+
+    const applyProductSelection = (index, product, focusQuantity = true) => {
+        setProductSuggestions({ index: null, list: [], activeIdx: -1 });
+        setItems(prev => {
+            const next = [...prev];
+            next[index] = calcItem({
+                ...next[index],
+                product_id: product.id,
+                product_name: getProductDisplayName(product),
+                available: product.current_stock || 0,
+            });
             return next;
         });
         if (focusQuantity) {
-            window.setTimeout(() => itemRefs.current[i]?.focus(), 50);
+            window.setTimeout(() => itemRefs.current[index]?.focus(), 50);
         }
     };
 
-    const selectProduct = async (i, product) => {
-        await applyProductSelection(i, product, true);
-    };
-
-    const commitProductMatch = async (i, rawValue) => {
+    const commitProductMatch = (index, rawValue) => {
         const exactMatch = findExactProductMatch(products, rawValue);
         if (exactMatch) {
-            await applyProductSelection(i, exactMatch, false);
-        } else if (productSuggestions.index === i) {
+            applyProductSelection(index, exactMatch, false);
+        } else if (productSuggestions.index === index) {
             setProductSuggestions({ index: null, list: [], activeIdx: -1 });
         }
     };
 
-    const onProductKeyDown = (e, i) => {
+    const onProductKeyDown = (event, index) => {
         const { list, activeIdx } = productSuggestions;
-        if (productSuggestions.index !== i || list.length === 0) return;
-        
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setProductSuggestions(s => ({ ...s, activeIdx: Math.min(s.activeIdx + 1, list.length - 1) }));
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setProductSuggestions(s => ({ ...s, activeIdx: Math.max(s.activeIdx - 1, -1) }));
-        } else if (e.key === 'Enter' || e.key === 'Tab') {
-            if (activeIdx >= 0 && activeIdx < list.length) {
-                e.preventDefault();
-                selectProduct(i, list[activeIdx]);
-            } else if (list.length > 0) {
-                e.preventDefault();
-                selectProduct(i, list[0]); 
-            }
-        } else if (e.key === 'Escape') {
+        if (productSuggestions.index !== index || list.length === 0) return;
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setProductSuggestions(suggestions => ({
+                ...suggestions,
+                activeIdx: Math.min(suggestions.activeIdx + 1, list.length - 1),
+            }));
+            return;
+        }
+
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setProductSuggestions(suggestions => ({
+                ...suggestions,
+                activeIdx: Math.max(suggestions.activeIdx - 1, -1),
+            }));
+            return;
+        }
+
+        if (event.key === 'Enter' || event.key === 'Tab') {
+            event.preventDefault();
+            applyProductSelection(index, activeIdx >= 0 ? list[activeIdx] : list[0], true);
+            return;
+        }
+
+        if (event.key === 'Escape') {
             setProductSuggestions({ index: null, list: [], activeIdx: -1 });
         }
     };
 
-    // Customer search
-    const handleCustomerSearch = (val) => {
-        setCustomerSearch(val);
+    const handleCustomerSearch = (value) => {
+        setCustomerSearch(value);
         setCustomerId('');
         setCustomerSuggestIndex(-1);
-        if (!val) { setCustomerSuggestions([]); return; }
-        setCustomerSuggestions(customers.filter(c =>
-            c.name.toLowerCase().includes(val.toLowerCase()) || (c.phone || '').includes(val)
-        ).slice(0, 6));
+        if (!value) {
+            setCustomerSuggestions([]);
+            return;
+        }
+        setCustomerSuggestions(customers.filter(customer => (
+            customer.name.toLowerCase().includes(value.toLowerCase()) || (customer.phone || '').includes(value)
+        )).slice(0, 6));
     };
 
-    const selectCustomer = (c) => {
-        setCustomerId(c.id);
-        setCustomerSearch(c.name + (c.phone ? ` (${c.phone})` : ''));
+    const selectCustomer = (customer) => {
+        setCustomerId(customer.id);
+        setCustomerSearch(customer.name + (customer.phone ? ` (${customer.phone})` : ''));
         setCustomerSuggestions([]);
     };
-    
-    const onCustomerKeyDown = (e) => {
+
+    const onCustomerKeyDown = (event) => {
         if (customerSuggestions.length === 0) return;
-        
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setCustomerSuggestIndex(i => Math.min(i + 1, customerSuggestions.length - 1));
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setCustomerSuggestIndex(i => Math.max(i - 1, -1));
-        } else if (e.key === 'Enter' || e.key === 'Tab') {
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setCustomerSuggestIndex(index => Math.min(index + 1, customerSuggestions.length - 1));
+            return;
+        }
+
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setCustomerSuggestIndex(index => Math.max(index - 1, -1));
+            return;
+        }
+
+        if (event.key === 'Enter' || event.key === 'Tab') {
             if (customerSuggestIndex >= 0 && customerSuggestIndex < customerSuggestions.length) {
-                e.preventDefault();
+                event.preventDefault();
                 selectCustomer(customerSuggestions[customerSuggestIndex]);
-            } else if (e.key === 'Tab' && customerSuggestions.length > 0) {
-                e.preventDefault();
+            } else if (event.key === 'Tab' && customerSuggestions.length > 0) {
+                event.preventDefault();
                 selectCustomer(customerSuggestions[0]);
             }
-        } else if (e.key === 'Escape') {
+            return;
+        }
+
+        if (event.key === 'Escape') {
             setCustomerSuggestions([]);
         }
     };
 
     const openDetails = async (id) => {
         try {
-            const res = await getSale(id);
-            setSelectedBill(res.data);
-        } catch { addToast('Failed to load details', 'error'); }
+            const response = await getSale(id);
+            setSelectedBill(response.data);
+        } catch {
+            addToast('Failed to load details', 'error');
+        }
     };
 
-    const totals = calcBill(items.filter(i => i.product_id), discountAmt, isDiscountPercent);
-    const nextBillNo = `BILL-${Date.now().toString().slice(-6)}`;
-    const resolveItemsForSave = async () => {
-        const resolved = await Promise.all(items.map(async (item) => {
+    const resolveItemsForSave = () => {
+        const resolved = items.map(item => {
             if (item.product_id || !item.product_name?.trim()) return item;
             const exactMatch = findExactProductMatch(products, item.product_name);
             if (!exactMatch) return item;
-
-            let batchId = '';
-            let available = 0;
-            try {
-                const response = await getStockBatchesForProduct(exactMatch.id);
-                if (response.data.length > 0) {
-                    batchId = response.data[0].id;
-                    available = response.data[0].available_quantity;
-                }
-            } catch { /* keep unresolved */ }
-
             return calcItem({
                 ...item,
                 product_id: exactMatch.id,
-                stock_batch_id: batchId,
                 product_name: getProductDisplayName(exactMatch),
-                available,
+                available: exactMatch.current_stock || 0,
             });
-        }));
-
+        });
         setItems(resolved);
         return resolved;
     };
 
-    const onLastEditableFieldKeyDown = (e, i) => {
-        if (e.key === 'Tab' && !e.shiftKey && i === items.length - 1) {
-            e.preventDefault();
+    const startEditingBill = (billData) => {
+        const linkedCustomer = billData?.customer || customers.find(customer => customer.id === billData?.customer_id) || null;
+        const restoredItems = (billData?.sales_items || []).map(item => calcItem({
+            ...emptyItem(),
+            product_id: item.product_id,
+            product_name: getSaleItemDisplayName(item),
+            quantity: item.quantity,
+            selling_price: item.selling_price,
+            gst_percent: item.gst_percent,
+            discount_percent: item.discount_percent,
+            available: products.find(product => product.id === item.product_id)?.current_stock || 0,
+        }));
+
+        setEditingBillId(billData.id);
+        setCustomerId(billData.customer_id || '');
+        setCustomerSearch(linkedCustomer ? linkedCustomer.name + (linkedCustomer.phone ? ` (${linkedCustomer.phone})` : '') : '');
+        setBillDate(formatInputDate(billData.bill_date));
+        setItems(restoredItems.length > 0 ? restoredItems : [emptyItem()]);
+        setDiscountAmt(billData.discount_amount || 0);
+        setIsDiscountPercent(false);
+        setPaymentMode(billData.payment_mode || 'Cash');
+        setPaidAmt(billData.paid_amount != null ? String(billData.paid_amount) : '');
+        setSelectedBill(null);
+        setView('new');
+        setProductSuggestions({ index: null, list: [], activeIdx: -1 });
+        setCustomerSuggestions([]);
+        setCustomerSuggestIndex(-1);
+        window.setTimeout(() => productInputRefs.current[0]?.focus(), 0);
+    };
+
+    const onLastEditableFieldKeyDown = (event, index) => {
+        if (event.key === 'Tab' && !event.shiftKey && index === items.length - 1) {
+            event.preventDefault();
             addRow(true);
         }
     };
 
+    const totals = calcBill(items.filter(item => item.product_id), discountAmt, isDiscountPercent);
+    const totalQuantity = getTotalQuantity(items.filter(item => item.product_id));
+
     const saveBill = async () => {
-        const preparedItems = await resolveItemsForSave();
-        const unresolvedItems = preparedItems.filter(item => item.product_name?.trim() && (!item.product_id || !item.stock_batch_id));
+        const preparedItems = resolveItemsForSave();
+        const unresolvedItems = preparedItems.filter(item => item.product_name?.trim() && !item.product_id);
         if (unresolvedItems.length > 0) {
-            addToast('Choose products from the suggestion list or type an exact product name with stock.', 'error');
+            addToast('Choose products from the suggestion list or type an exact product name.', 'error');
             return;
         }
-        const validItems = preparedItems.filter(i => i.product_id && i.stock_batch_id && i.quantity > 0);
-        if (validItems.length === 0) { addToast('Add at least one product with stock', 'error'); return; }
+
+        const validItems = preparedItems.filter(item => item.product_id && item.quantity > 0);
+        if (validItems.length === 0) {
+            addToast('Add at least one product with stock', 'error');
+            return;
+        }
+
         const billTotals = calcBill(validItems, discountAmt, isDiscountPercent);
         const paid = paidAmt === '' ? billTotals.grand : parseFloat(paidAmt);
         const outstanding = Math.max(0, billTotals.grand - paid);
+        const payload = {
+            customer_id: customerId || null,
+            ...(billDate ? { bill_date: billDate } : {}),
+            subtotal: billTotals.subtotal,
+            discount_amount: billTotals.extraDiscountValue,
+            taxable_amount: billTotals.taxable,
+            cgst_amount: billTotals.cgst,
+            sgst_amount: billTotals.sgst,
+            grand_total: billTotals.grand,
+            paid_amount: paid,
+            outstanding_amount: outstanding,
+            payment_status: outstanding === 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending',
+            payment_mode: paymentMode,
+            items: validItems.map(item => ({
+                product_id: item.product_id,
+                quantity: item.quantity,
+                selling_price: item.selling_price,
+                gst_percent: item.gst_percent,
+                discount_percent: item.discount_percent,
+                final_amount: item.final_amount,
+            })),
+        };
+
         setSaving(true);
         try {
-            await createSale({
-                customer_id: customerId || null,
-                ...(billDate ? { bill_date: billDate } : {}),
-                bill_number: nextBillNo,
-                subtotal: billTotals.subtotal,
-                discount_amount: billTotals.extraDiscountValue,
-                taxable_amount: billTotals.taxable,
-                cgst_amount: billTotals.cgst,
-                sgst_amount: billTotals.sgst,
-                grand_total: billTotals.grand,
-                paid_amount: paid,
-                outstanding_amount: outstanding,
-                payment_status: outstanding === 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending',
-                payment_mode: paymentMode,
-                items: validItems.map(it => ({
-                    product_id: it.product_id,
-                    stock_batch_id: it.stock_batch_id,
-                    quantity: it.quantity,
-                    selling_price: it.selling_price,
-                    gst_percent: it.gst_percent,
-                    discount_percent: it.discount_percent,
-                    final_amount: it.final_amount,
-                })),
-            });
-            addToast(`Bill ${nextBillNo} saved!`, 'success');
-            // Reset form
-            setItems([emptyItem()]); setCustomerId(''); setCustomerSearch('');
-            setBillDate(getTodayInputValue());
-            setDiscountAmt(0); setPaidAmt(''); setIsDiscountPercent(false);
-            load();
-        } catch (e) {
-            addToast(e?.response?.data?.detail || 'Failed to save bill', 'error');
-        } finally { setSaving(false); }
+            const response = editingBillId
+                ? await updateSale(editingBillId, payload)
+                : await createSale(payload);
+            addToast(
+                editingBillId
+                    ? `Bill ${response.data.bill_number} updated!`
+                    : `Bill ${response.data.bill_number} saved!`,
+                'success'
+            );
+            resetBillForm();
+            await load();
+        } catch (error) {
+            addToast(error?.response?.data?.detail || 'Failed to save bill', 'error');
+        } finally {
+            setSaving(false);
+        }
     };
 
-    // Alt+Enter → save
     useEffect(() => {
-        const h = (e) => { if (e.altKey && e.key === 'Enter') saveBill(); };
-        window.addEventListener('keydown', h);
-        return () => window.removeEventListener('keydown', h);
+        const handleShortcut = (event) => {
+            if (event.altKey && event.key === 'Enter') {
+                saveBill();
+            }
+        };
+        window.addEventListener('keydown', handleShortcut);
+        return () => window.removeEventListener('keydown', handleShortcut);
     });
 
     const formatDisplayDate = (value) => new Date(value).toLocaleDateString('en-IN');
@@ -359,6 +465,7 @@ export default function Sales() {
         return `${year}-${month}-${day}`;
     };
     const printCustomer = selectedBill?.customer || customers.find(customer => customer.id === selectedBill?.customer_id) || null;
+    const selectedBillTotalQuantity = selectedBill?.total_quantity ?? getTotalQuantity(selectedBill?.sales_items || []);
 
     const handlePrint = () => {
         if (!selectedBill) return;
@@ -383,21 +490,30 @@ export default function Sales() {
 
     return (
         <div>
-            {/* Tab */}
             <div className="page-header">
                 <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-surface)', borderRadius: 10, padding: '0.25rem', border: '1px solid var(--border)' }}>
                     {[['new', ShoppingCart, 'New Bill'], ['history', CheckCircle, 'History']].map(([key, Icon, label]) => (
-                        <button key={key} onClick={() => setView(key)} className="btn btn-sm" style={{
-                            background: view === key ? 'var(--accent)' : 'transparent',
-                            color: view === key ? '#fff' : 'var(--text-muted)',
-                        }}><Icon size={14} /> {label}</button>
+                        <button
+                            key={key}
+                            onClick={() => setView(key)}
+                            className="btn btn-sm"
+                            style={{
+                                background: view === key ? 'var(--accent)' : 'transparent',
+                                color: view === key ? '#fff' : 'var(--text-muted)',
+                            }}
+                        >
+                            <Icon size={14} /> {label}
+                        </button>
                     ))}
                 </div>
                 {view === 'new' && (
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        {editingBillId && (
+                            <button className="btn btn-ghost btn-sm" onClick={resetBillForm}>Cancel Edit</button>
+                        )}
                         <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
                         <button className="btn btn-primary" onClick={saveBill} disabled={saving}>
-                            <Save size={14} /> {saving ? 'Saving…' : 'Save Bill'} <kbd className="kbd">Alt+↵</kbd>
+                            <Save size={14} /> {saving ? 'Saving…' : editingBillId ? 'Update Bill' : 'Save Bill'} <kbd className="kbd">Alt+↵</kbd>
                         </button>
                     </div>
                 )}
@@ -409,17 +525,30 @@ export default function Sales() {
                         <div className="empty-state"><ShoppingCart size={36} /><span>No bills yet</span></div>
                     ) : (
                         <table className="data-table">
-                            <thead><tr><th>Bill No.</th><th>Date</th><th>Payment</th><th>Status</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Paid</th><th style={{ textAlign: 'right' }}>Due</th><th style={{ textAlign: 'right' }}>Details</th></tr></thead>
+                            <thead>
+                                <tr>
+                                    <th>Bill No.</th>
+                                    <th>Date</th>
+                                    <th>Qty</th>
+                                    <th>Payment</th>
+                                    <th>Status</th>
+                                    <th style={{ textAlign: 'right' }}>Total</th>
+                                    <th style={{ textAlign: 'right' }}>Paid</th>
+                                    <th style={{ textAlign: 'right' }}>Due</th>
+                                    <th style={{ textAlign: 'right' }}>Details</th>
+                                </tr>
+                            </thead>
                             <tbody>
-                                {bills.map(b => (
-                                    <tr key={b.id} style={{ cursor: 'pointer' }} onClick={() => openDetails(b.id)}>
-                                        <td style={{ fontWeight: 600 }}>{b.bill_number}</td>
-                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{new Date(b.bill_date).toLocaleDateString('en-IN')}</td>
-                                        <td><span className="badge badge-muted">{b.payment_mode || '—'}</span></td>
-                                        <td><span className={`badge ${b.payment_status === 'Paid' ? 'badge-success' : b.payment_status === 'Partial' ? 'badge-warning' : 'badge-muted'}`}>{b.payment_status}</span></td>
-                                        <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{b.grand_total?.toFixed(2)}</td>
-                                        <td style={{ textAlign: 'right', color: 'var(--success)' }}>₹{b.paid_amount?.toFixed(2)}</td>
-                                        <td style={{ textAlign: 'right', color: b.outstanding_amount > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>₹{b.outstanding_amount?.toFixed(2)}</td>
+                                {bills.map(bill => (
+                                    <tr key={bill.id} style={{ cursor: 'pointer' }} onClick={() => openDetails(bill.id)}>
+                                        <td style={{ fontWeight: 600 }}>{bill.bill_number}</td>
+                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{formatDisplayDate(bill.bill_date)}</td>
+                                        <td>{bill.total_quantity ?? 0}</td>
+                                        <td><span className="badge badge-muted">{bill.payment_mode || '—'}</span></td>
+                                        <td><span className={`badge ${bill.payment_status === 'Paid' ? 'badge-success' : bill.payment_status === 'Partial' ? 'badge-warning' : 'badge-muted'}`}>{bill.payment_status}</span></td>
+                                        <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{bill.grand_total?.toFixed(2)}</td>
+                                        <td style={{ textAlign: 'right', color: 'var(--success)' }}>₹{bill.paid_amount?.toFixed(2)}</td>
+                                        <td style={{ textAlign: 'right', color: bill.outstanding_amount > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>₹{bill.outstanding_amount?.toFixed(2)}</td>
                                         <td style={{ textAlign: 'right' }}>
                                             <button className="btn-icon" title="View Details"><Eye size={14} /></button>
                                         </td>
@@ -431,34 +560,40 @@ export default function Sales() {
                 </div>
             ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr)', gap: '1rem', alignItems: 'start' }}>
-                    {/* Bill Entry */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        {/* Customer */}
                         <div className="surface" style={{ padding: '1rem', position: 'relative', zIndex: 10 }}>
                             <div className="form-group">
                                 <label className="form-label">Customer (optional)</label>
-                                <input value={customerSearch} onChange={e => handleCustomerSearch(e.target.value)}
+                                <input
+                                    value={customerSearch}
+                                    onChange={event => handleCustomerSearch(event.target.value)}
                                     onKeyDown={onCustomerKeyDown}
-                                    placeholder="Search by name or phone…" autoComplete="off" />
+                                    placeholder="Search by name or phone…"
+                                    autoComplete="off"
+                                />
                             </div>
                             {customerSuggestions.length > 0 && (
                                 <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 50, listStyle: 'none', margin: '2px 0' }}>
-                                    {customerSuggestions.map((c, idx) => (
-                                        <li key={c.id} onMouseDown={() => selectCustomer(c)}
-                                            style={{ 
-                                                padding: '0.6rem 1rem', cursor: 'pointer', fontSize: '0.85rem',
-                                                background: idx === customerSuggestIndex ? 'var(--bg-hover)' : 'transparent'
+                                    {customerSuggestions.map((customer, index) => (
+                                        <li
+                                            key={customer.id}
+                                            onMouseDown={() => selectCustomer(customer)}
+                                            onMouseEnter={() => setCustomerSuggestIndex(index)}
+                                            style={{
+                                                padding: '0.6rem 1rem',
+                                                cursor: 'pointer',
+                                                fontSize: '0.85rem',
+                                                background: index === customerSuggestIndex ? 'var(--bg-hover)' : 'transparent',
                                             }}
-                                            onMouseEnter={() => setCustomerSuggestIndex(idx)}
                                         >
-                                            <strong>{c.name}</strong> {c.phone && <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>{c.phone}</span>}
+                                            <strong>{customer.name}</strong>
+                                            {customer.phone && <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>{customer.phone}</span>}
                                         </li>
                                     ))}
                                 </ul>
                             )}
                         </div>
 
-                        {/* Items table */}
                         <div className="surface" style={{ overflow: 'visible', zIndex: 5 }}>
                             <div style={{ overflowX: 'visible' }}>
                                 <table className="data-table" style={{ minWidth: 820 }}>
@@ -470,35 +605,41 @@ export default function Sales() {
                                             <th style={{ width: 100 }}>GST%</th>
                                             <th style={{ width: 100 }}>Disc%</th>
                                             <th style={{ textAlign: 'right', width: 130 }}>Amount</th>
-                                            <th style={{ width: 40 }}></th>
+                                            <th style={{ width: 40 }} />
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {items.map((it, i) => (
-                                            <tr key={i}>
+                                        {items.map((item, index) => (
+                                            <tr key={index}>
                                                 <td style={{ position: 'relative' }}>
                                                     <input
-                                                        ref={el => productInputRefs.current[i] = el}
-                                                        value={it.product_name}
-                                                        onChange={e => handleProductSearch(i, e.target.value)}
-                                                        onKeyDown={e => onProductKeyDown(e, i)}
-                                                        onBlur={() => window.setTimeout(() => { void commitProductMatch(i, it.product_name); }, 120)}
+                                                        ref={element => { productInputRefs.current[index] = element; }}
+                                                        value={item.product_name}
+                                                        onChange={event => handleProductSearch(index, event.target.value)}
+                                                        onKeyDown={event => onProductKeyDown(event, index)}
+                                                        onBlur={() => window.setTimeout(() => commitProductMatch(index, item.product_name), 120)}
                                                         placeholder="Type product name…"
                                                         style={{ fontSize: '0.82rem' }}
                                                         autoComplete="off"
                                                     />
-                                                    {productSuggestions.index === i && productSuggestions.list.length > 0 && (
+                                                    {productSuggestions.index === index && productSuggestions.list.length > 0 && (
                                                         <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 100, listStyle: 'none', margin: '2px 0', maxHeight: 200, overflowY: 'auto' }}>
-                                                            {productSuggestions.list.map((p, idx) => (
-                                                                <li key={p.id} onMouseDown={() => selectProduct(i, p)}
-                                                                    style={{ 
-                                                                        padding: '0.55rem 0.85rem', cursor: 'pointer', fontSize: '0.82rem', display: 'flex', justifyContent: 'space-between',
-                                                                        background: idx === productSuggestions.activeIdx ? 'var(--bg-hover)' : 'transparent'
-                                                                     }}
-                                                                    onMouseEnter={() => setProductSuggestions(s => ({ ...s, activeIdx: idx }))}
+                                                            {productSuggestions.list.map((product, suggestionIndex) => (
+                                                                <li
+                                                                    key={product.id}
+                                                                    onMouseDown={() => applyProductSelection(index, product)}
+                                                                    onMouseEnter={() => setProductSuggestions(suggestions => ({ ...suggestions, activeIdx: suggestionIndex }))}
+                                                                    style={{
+                                                                        padding: '0.55rem 0.85rem',
+                                                                        cursor: 'pointer',
+                                                                        fontSize: '0.82rem',
+                                                                        display: 'flex',
+                                                                        justifyContent: 'space-between',
+                                                                        background: suggestionIndex === productSuggestions.activeIdx ? 'var(--bg-hover)' : 'transparent',
+                                                                    }}
                                                                 >
-                                                                    <span>{p.brand_name ? <strong>{p.brand_name} </strong> : ''}{p.product_name}</span>
-                                                                    <span className={`badge ${p.current_stock < 5 ? 'badge-warning' : 'badge-muted'}`}>{p.current_stock}</span>
+                                                                    <span>{product.brand_name ? <strong>{product.brand_name} </strong> : ''}{product.product_name}</span>
+                                                                    <span className={`badge ${product.current_stock < 5 ? 'badge-warning' : 'badge-muted'}`}>{product.current_stock}</span>
                                                                 </li>
                                                             ))}
                                                         </ul>
@@ -506,29 +647,36 @@ export default function Sales() {
                                                 </td>
                                                 <td>
                                                     <input
-                                                        ref={el => itemRefs.current[i] = el}
-                                                        type="number" min={1} value={it.quantity}
-                                                        onChange={e => updateItem(i, 'quantity', +e.target.value)}
+                                                        ref={element => { itemRefs.current[index] = element; }}
+                                                        type="number"
+                                                        min={1}
+                                                        value={item.quantity}
+                                                        onChange={event => updateItem(index, 'quantity', +event.target.value)}
                                                         style={{ fontSize: '0.82rem' }}
-                                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addRow(true); } }}
+                                                        onKeyDown={event => {
+                                                            if (event.key === 'Enter') {
+                                                                event.preventDefault();
+                                                                if (index === items.length - 1) addRow(true);
+                                                            }
+                                                        }}
                                                     />
                                                 </td>
                                                 <td>
-                                                    <input type="number" min={0} step={0.01} value={it.selling_price} onChange={e => updateItem(i, 'selling_price', +e.target.value)} style={{ fontSize: '0.82rem' }} />
+                                                    <input type="number" min={0} step={0.01} value={item.selling_price} onChange={event => updateItem(index, 'selling_price', +event.target.value)} style={{ fontSize: '0.82rem' }} />
                                                 </td>
                                                 <td>
-                                                    <select value={it.gst_percent} onChange={e => updateItem(i, 'gst_percent', +e.target.value)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
-                                                        {GST_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                                                    <select value={item.gst_percent} onChange={event => updateItem(index, 'gst_percent', +event.target.value)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
+                                                        {GST_RATES.map(rate => <option key={rate} value={rate}>{rate}%</option>)}
                                                     </select>
                                                 </td>
                                                 <td>
-                                                    <input type="number" min={0} max={100} value={it.discount_percent} onChange={e => updateItem(i, 'discount_percent', +e.target.value)} onKeyDown={e => onLastEditableFieldKeyDown(e, i)} style={{ fontSize: '0.82rem' }} />
+                                                    <input type="number" min={0} max={100} value={item.discount_percent} onChange={event => updateItem(index, 'discount_percent', +event.target.value)} onKeyDown={event => onLastEditableFieldKeyDown(event, index)} style={{ fontSize: '0.82rem' }} />
                                                 </td>
                                                 <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
-                                                    ₹{it.final_amount.toFixed(2)}
+                                                    ₹{item.final_amount.toFixed(2)}
                                                 </td>
                                                 <td>
-                                                    <button className="btn-icon" onClick={() => removeRow(i)} title="Remove row" style={{ opacity: items.length === 1 ? 0.3 : 1 }} disabled={items.length === 1}>
+                                                    <button className="btn-icon" onClick={() => removeRow(index)} title="Remove row" style={{ opacity: items.length === 1 ? 0.3 : 1 }} disabled={items.length === 1}>
                                                         <Trash2 size={13} color="var(--danger)" />
                                                     </button>
                                                 </td>
@@ -540,24 +688,29 @@ export default function Sales() {
                         </div>
                     </div>
 
-                    {/* Bill Summary Panel */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'sticky', top: 0 }}>
                         <div className="surface" style={{ padding: '1.25rem' }}>
                             <div className="form-group" style={{ marginBottom: '1rem' }}>
                                 <label className="form-label">Bill Date</label>
-                                <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)} />
+                                <input type="date" value={billDate} onChange={event => setBillDate(event.target.value)} />
                             </div>
+                            {editingBillId && (
+                                <div style={{ marginBottom: '1rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                                    Editing an existing bill. The bill number stays the same and a new revision is saved.
+                                </div>
+                            )}
                             <p style={{ fontWeight: 700, marginBottom: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Bill Summary</p>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.875rem' }}>
                                 {[
+                                    ['Total Qty', totalQuantity],
                                     ['Subtotal', `₹${totals.subtotal.toFixed(2)}`],
                                     ['Extra Discount', `-₹${totals.extraDiscountValue.toFixed(2)}`],
                                     ['Taxable', `₹${totals.taxable.toFixed(2)}`],
                                     ['CGST', `₹${totals.cgst.toFixed(2)}`],
                                     ['SGST', `₹${totals.sgst.toFixed(2)}`],
-                                ].map(([k, v]) => (
-                                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                                        <span>{k}</span><span>{v}</span>
+                                ].map(([label, value]) => (
+                                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                                        <span>{label}</span><span>{value}</span>
                                     </div>
                                 ))}
                                 <div style={{ borderTop: '1px solid var(--border)', marginTop: '0.5rem', paddingTop: '0.5rem', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.2rem' }}>
@@ -571,37 +724,41 @@ export default function Sales() {
                                 </div>
                             </div>
 
-                            {/* Extra discount */}
                             <div className="form-group" style={{ marginTop: '1rem' }}>
                                 <label className="form-label">Extra Discount</label>
                                 <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                    <input type="number" min={0} value={discountAmt} onChange={e => setDiscountAmt(+e.target.value)} style={{ flex: 1 }} />
+                                    <input type="number" min={0} value={discountAmt} onChange={event => setDiscountAmt(+event.target.value)} style={{ flex: 1 }} />
                                     <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
-                                        <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); setIsDiscountPercent(false); }} style={{ borderRadius: 0, padding: '0 0.5rem', background: !isDiscountPercent ? 'var(--accent)' : 'var(--bg-elevated)', color: !isDiscountPercent ? '#fff' : 'var(--text-muted)' }}>₹</button>
-                                        <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); setIsDiscountPercent(true); }} style={{ borderRadius: 0, padding: '0 0.5rem', background: isDiscountPercent ? 'var(--accent)' : 'var(--bg-elevated)', color: isDiscountPercent ? '#fff' : 'var(--text-muted)' }}>%</button>
+                                        <button className="btn btn-sm" onClick={event => { event.preventDefault(); setIsDiscountPercent(false); }} style={{ borderRadius: 0, padding: '0 0.5rem', background: !isDiscountPercent ? 'var(--accent)' : 'var(--bg-elevated)', color: !isDiscountPercent ? '#fff' : 'var(--text-muted)' }}>₹</button>
+                                        <button className="btn btn-sm" onClick={event => { event.preventDefault(); setIsDiscountPercent(true); }} style={{ borderRadius: 0, padding: '0 0.5rem', background: isDiscountPercent ? 'var(--accent)' : 'var(--bg-elevated)', color: isDiscountPercent ? '#fff' : 'var(--text-muted)' }}>%</button>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Payment mode */}
                             <div style={{ marginTop: '1rem' }}>
                                 <p className="form-label" style={{ marginBottom: '0.4rem' }}>Payment Mode</p>
                                 <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                    {['Cash', 'UPI', 'Credit'].map(m => (
-                                        <button key={m} onClick={() => setPaymentMode(m)} className="btn btn-sm" style={{
-                                            flex: 1,
-                                            background: paymentMode === m ? 'var(--accent)' : 'var(--bg-elevated)',
-                                            color: paymentMode === m ? '#fff' : 'var(--text-muted)',
-                                            border: `1px solid ${paymentMode === m ? 'var(--accent)' : 'var(--border)'}`,
-                                        }}>{m}</button>
+                                    {['Cash', 'UPI', 'Credit'].map(mode => (
+                                        <button
+                                            key={mode}
+                                            onClick={() => setPaymentMode(mode)}
+                                            className="btn btn-sm"
+                                            style={{
+                                                flex: 1,
+                                                background: paymentMode === mode ? 'var(--accent)' : 'var(--bg-elevated)',
+                                                color: paymentMode === mode ? '#fff' : 'var(--text-muted)',
+                                                border: `1px solid ${paymentMode === mode ? 'var(--accent)' : 'var(--border)'}`,
+                                            }}
+                                        >
+                                            {mode}
+                                        </button>
                                     ))}
                                 </div>
                             </div>
 
-                            {/* Paid amount */}
                             <div className="form-group" style={{ marginTop: '0.75rem' }}>
                                 <label className="form-label">Paid Amount (₹)</label>
-                                <input type="number" min={0} value={paidAmt} onChange={e => setPaidAmt(e.target.value)} placeholder={totals.grand.toFixed(2)} />
+                                <input type="number" min={0} value={paidAmt} onChange={event => setPaidAmt(event.target.value)} placeholder={totals.grand.toFixed(2)} />
                             </div>
                             {paidAmt !== '' && (
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginTop: '0.5rem', padding: '0.5rem 0.75rem', background: 'var(--bg-elevated)', borderRadius: 8 }}>
@@ -613,36 +770,43 @@ export default function Sales() {
                             )}
 
                             <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem', justifyContent: 'center' }} onClick={saveBill} disabled={saving}>
-                                <Save size={15} /> {saving ? 'Saving…' : 'Save Bill'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+↵</kbd>
+                                <Save size={15} /> {saving ? 'Saving…' : editingBillId ? 'Update Bill' : 'Save Bill'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+↵</kbd>
                             </button>
                         </div>
 
                         <div className="surface" style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             <p style={{ marginBottom: '0.3rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Keyboard shortcuts</p>
-                            <p><kbd className="kbd">Tab</kbd> — move between fields / select item</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+N</kbd> — add item row</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Enter</kbd> on last qty — new row</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+↵</kbd> — save bill</p>
+                            <p><kbd className="kbd">Tab</kbd> - move between fields / select item</p>
+                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+N</kbd> - add item row</p>
+                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Enter</kbd> on last qty - new row</p>
+                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+↵</kbd> - save bill</p>
                         </div>
                     </div>
                 </div>
             )}
-            
-            {/* Sales Bill Details Modal */}
+
             {selectedBill && (
-                <Modal title={`Bill Details: ${selectedBill.bill_number}`} onClose={() => setSelectedBill(null)} footer={
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button className="btn btn-primary" onClick={handlePrint}><Printer size={15} /> Print</button>
-                        <button className="btn btn-ghost" onClick={() => setSelectedBill(null)}>Close</button>
-                    </div>
-                }>
+                <Modal
+                    title={`Bill Details: ${selectedBill.bill_number}`}
+                    onClose={() => setSelectedBill(null)}
+                    footer={(
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button className="btn btn-ghost" onClick={() => startEditingBill(selectedBill)}><Pencil size={15} /> Edit</button>
+                            <button className="btn btn-primary" onClick={handlePrint}><Printer size={15} /> Print</button>
+                            <button className="btn btn-ghost" onClick={() => setSelectedBill(null)}>Close</button>
+                        </div>
+                    )}
+                >
                     <div className="no-print">
                         <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                             <div>
                                 <strong>Customer:</strong> {printCustomer?.name || 'Walk-in Customer'}
                                 {printCustomer?.address ? `, ${printCustomer.address}` : ''}
                             </div>
-                            <div><strong>Date:</strong> {formatDisplayDate(selectedBill.bill_date)}</div>
+                            <div>
+                                <strong>Date:</strong> {formatDisplayDate(selectedBill.bill_date)}
+                                {selectedBill.revision_number > 1 ? ` | Revision ${selectedBill.revision_number}` : ''}
+                            </div>
                         </div>
                         <table className="data-table">
                             <thead>
@@ -656,19 +820,20 @@ export default function Sales() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {selectedBill.sales_items?.map(it => (
-                                    <tr key={it.id}>
-                                        <td>{getSaleItemDisplayName(it)}</td>
-                                        <td>{it.quantity}</td>
-                                        <td>₹{it.selling_price.toFixed(2)}</td>
-                                        <td>{it.discount_percent}%</td>
-                                        <td>{it.gst_percent}%</td>
-                                        <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{it.final_amount.toFixed(2)}</td>
+                                {selectedBill.sales_items?.map(item => (
+                                    <tr key={item.id}>
+                                        <td>{getSaleItemDisplayName(item)}</td>
+                                        <td>{item.quantity}</td>
+                                        <td>₹{item.selling_price.toFixed(2)}</td>
+                                        <td>{item.discount_percent}%</td>
+                                        <td>{item.gst_percent}%</td>
+                                        <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{item.final_amount.toFixed(2)}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                         <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', fontSize: '0.9rem', gap: '0.3rem' }}>
+                            <div>Total Qty: {selectedBillTotalQuantity}</div>
                             <div>Subtotal: ₹{selectedBill.subtotal.toFixed(2)}</div>
                             {selectedBill.discount_amount > 0 && <div>Extra Discount: -₹{selectedBill.discount_amount.toFixed(2)}</div>}
                             <div>Taxable: ₹{selectedBill.taxable_amount.toFixed(2)}</div>
@@ -682,7 +847,6 @@ export default function Sales() {
                 </Modal>
             )}
 
-            {/* Hidden Printable Invoice */}
             {selectedBill && settings && (
                 <div className="printable-area">
                     <div style={{ padding: '22px 26px', color: '#000', background: '#fff', fontSize: '12px', lineHeight: 1.25 }}>
@@ -717,6 +881,8 @@ export default function Sales() {
                                 <div style={{ fontSize: '11px', color: '#555', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Bill Details</div>
                                 <div style={{ fontWeight: 'bold', marginBottom: '3px' }}>Bill No: {selectedBill.bill_number}</div>
                                 <div>Date: {formatDisplayDate(selectedBill.bill_date)}</div>
+                                <div>Total Qty: {selectedBillTotalQuantity}</div>
+                                {selectedBill.revision_number > 1 && <div>Revision: {selectedBill.revision_number}</div>}
                             </div>
                         </div>
 
@@ -731,18 +897,18 @@ export default function Sales() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {selectedBill.sales_items?.map((it, idx) => (
-                                    <tr key={it.id}>
-                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', verticalAlign: 'top' }}>{idx + 1}</td>
+                                {selectedBill.sales_items?.map((item, index) => (
+                                    <tr key={item.id}>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', verticalAlign: 'top' }}>{index + 1}</td>
                                         <td style={{ padding: '5px 7px', border: '1px solid #ccc' }}>
-                                            {getSaleItemDisplayName(it)}
+                                            {getSaleItemDisplayName(item)}
                                             <div style={{ fontSize: '10px', color: '#555', marginTop: '2px' }}>
-                                                HSN: — | GST: {it.gst_percent}% | Disc: {it.discount_percent}%
+                                                HSN: - | GST: {item.gst_percent}% | Disc: {item.discount_percent}%
                                             </div>
                                         </td>
-                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'center', verticalAlign: 'top' }}>{it.quantity}</td>
-                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'right', verticalAlign: 'top' }}>{it.selling_price.toFixed(2)}</td>
-                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'right', verticalAlign: 'top' }}>{it.final_amount.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'center', verticalAlign: 'top' }}>{item.quantity}</td>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'right', verticalAlign: 'top' }}>{item.selling_price.toFixed(2)}</td>
+                                        <td style={{ padding: '5px 7px', border: '1px solid #ccc', textAlign: 'right', verticalAlign: 'top' }}>{item.final_amount.toFixed(2)}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -751,6 +917,10 @@ export default function Sales() {
                         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                             <table style={{ width: '300px', borderCollapse: 'collapse' }}>
                                 <tbody>
+                                    <tr>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right' }}>Total Qty:</td>
+                                        <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 'bold' }}>{selectedBillTotalQuantity}</td>
+                                    </tr>
                                     <tr>
                                         <td style={{ padding: '5px 6px', textAlign: 'right' }}>Subtotal:</td>
                                         <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 'bold' }}>₹{selectedBill.subtotal.toFixed(2)}</td>

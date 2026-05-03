@@ -1,5 +1,5 @@
 from sqlalchemy import (Column, Integer, String, Float, ForeignKey,
-                         DateTime, Date, Text, Boolean, func)
+                         DateTime, Date, Text, Boolean, func, UniqueConstraint)
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -136,6 +136,10 @@ class PurchaseInvoice(TimestampMixin, SoftDeleteMixin, Base):
     purchase_items = relationship("PurchaseItem", back_populates="invoice")
     stock_batches = relationship("StockBatch", back_populates="purchase_invoice")
 
+    @property
+    def total_quantity(self):
+        return sum((item.quantity or 0) for item in self.purchase_items or [])
+
 
 # ─── Purchase Items ───────────────────────────────────────────────────────────
 class PurchaseItem(Base):
@@ -147,6 +151,7 @@ class PurchaseItem(Base):
     unit_price = Column(Float)
     gst_percent = Column(Float)
     line_total = Column(Float)
+    product_name_snapshot = Column(String)
 
     invoice = relationship("PurchaseInvoice", back_populates="purchase_items")
     product = relationship("Product", back_populates="purchase_items")
@@ -169,6 +174,7 @@ class StockBatch(Base):
     product = relationship("Product", back_populates="stock_batches")
     purchase_invoice = relationship("PurchaseInvoice", back_populates="stock_batches")
     sales_items = relationship("SaleItem", back_populates="stock_batch")
+    sale_item_allocations = relationship("SaleItemBatchAllocation", back_populates="stock_batch")
 
 
 # ─── Sales Bills ──────────────────────────────────────────────────────────────
@@ -189,10 +195,23 @@ class SalesBill(TimestampMixin, SoftDeleteMixin, Base):
     payment_status = Column(String, default="Pending")
     payment_mode = Column(String)
     status = Column(String, default="ACTIVE")  # ACTIVE, CANCELLED
+    financial_year = Column(String, index=True)
+    bill_sequence = Column(Integer, index=True)
+    revision_number = Column(Integer, default=1, nullable=False)
+    edited_at = Column(DateTime)
+    edited_by = Column(String)
 
     customer = relationship("Customer", back_populates="sales_bills")
     sales_items = relationship("SaleItem", back_populates="bill")
     payment_transactions = relationship("PaymentTransaction", back_populates="bill")
+
+    __table_args__ = (
+        UniqueConstraint("financial_year", "bill_sequence", name="uq_sales_bills_financial_year_sequence"),
+    )
+
+    @property
+    def total_quantity(self):
+        return sum((item.quantity or 0) for item in self.sales_items or [])
 
 
 # ─── Sale Items ───────────────────────────────────────────────────────────────
@@ -207,10 +226,29 @@ class SaleItem(Base):
     gst_percent = Column(Float)
     discount_percent = Column(Float, default=0)
     final_amount = Column(Float)
+    product_name_snapshot = Column(String)
 
     bill = relationship("SalesBill", back_populates="sales_items")
     product = relationship("Product", back_populates="sales_items")
     stock_batch = relationship("StockBatch", back_populates="sales_items")
+    batch_allocations = relationship("SaleItemBatchAllocation", back_populates="sale_item")
+
+
+class SaleItemBatchAllocation(Base):
+    __tablename__ = "sale_item_batch_allocations"
+    id = Column(Integer, primary_key=True, index=True)
+    sale_item_id = Column(Integer, ForeignKey("sales_items.id"), nullable=False, index=True)
+    stock_batch_id = Column(Integer, ForeignKey("stock_batches.id"), nullable=False, index=True)
+    quantity = Column(Integer, nullable=False)
+
+    sale_item = relationship("SaleItem", back_populates="batch_allocations")
+    stock_batch = relationship("StockBatch", back_populates="sale_item_allocations")
+
+
+class SalesBillSequence(Base):
+    __tablename__ = "sales_bill_sequences"
+    financial_year = Column(String, primary_key=True)
+    last_number = Column(Integer, nullable=False, default=0)
 
 
 # ─── Stock Ledger ─────────────────────────────────────────────────────────────
