@@ -2,9 +2,12 @@
 main.py - Thin orchestrator. Imports routers, registers middleware, and runs startup.
 Business logic lives in routers/ and services/.
 """
+import logging
 import os
+import time
+from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
@@ -15,6 +18,12 @@ import models
 import tasks
 from routers import auth, contacts, products, purchases, reports, sales, settings
 from security import get_password_hash
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("stockpro.api")
 
 app = FastAPI(
     title="StockPro API",
@@ -28,6 +37,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 app.include_router(auth.router)
@@ -39,11 +49,69 @@ app.include_router(reports.router)
 app.include_router(settings.router)
 
 
+@app.middleware("http")
+async def request_context_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    platform_request_id = request.headers.get("Rndr-Id")
+    request.state.request_id = request_id
+    request.state.platform_request_id = platform_request_id
+    started_at = time.perf_counter()
+
+    response = await call_next(request)
+
+    duration_ms = (time.perf_counter() - started_at) * 1000
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "request_complete request_id=%s render_request_id=%s method=%s path=%s status=%s duration_ms=%.2f",
+        request_id,
+        platform_request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
+
+
 @app.exception_handler(SQLAlchemyError)
-async def database_exception_handler(request, exc):
+async def database_exception_handler(request: Request, exc: SQLAlchemyError):
+    request_id = getattr(request.state, "request_id", "unknown")
+    platform_request_id = getattr(request.state, "platform_request_id", None)
+    logger.exception(
+        "database_error request_id=%s render_request_id=%s method=%s path=%s",
+        request_id,
+        platform_request_id,
+        request.method,
+        request.url.path,
+    )
     return JSONResponse(
         status_code=503,
-        content={"detail": "Database unavailable. Please try again shortly."},
+        content={
+            "detail": "Database unavailable. Please try again shortly.",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", "unknown")
+    platform_request_id = getattr(request.state, "platform_request_id", None)
+    logger.exception(
+        "unhandled_error request_id=%s render_request_id=%s method=%s path=%s",
+        request_id,
+        platform_request_id,
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error. Share the reference ID if this repeats.",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
     )
 
 
@@ -54,6 +122,7 @@ async def startup():
 
     # Start the auto-archiving background task
     import asyncio
+
     asyncio.create_task(tasks.auto_archive_products())
 
     # Create tables if they don't exist (dev convenience; prod uses Alembic)
