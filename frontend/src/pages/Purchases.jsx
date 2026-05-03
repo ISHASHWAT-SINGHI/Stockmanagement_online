@@ -82,6 +82,10 @@ function calcItem(it, priceIncludesTax = false) {
     }
 }
 
+function getApiErrorMessage(error, fallback) {
+    return error?.response?.data?.detail || error?.message || fallback;
+}
+
 export default function Purchases() {
     const { addToast } = useToast();
     const [products, setProducts] = useState([]);
@@ -106,12 +110,29 @@ export default function Purchases() {
     const productInputRefs = useRef([]);
 
     const load = useCallback(async () => {
-        try {
-            const [pRes, sRes, invRes] = await Promise.all([getProducts(), getSuppliers(), getPurchaseInvoices()]);
-            setProducts(pRes.data);
-            setSuppliers(sRes.data);
-            setInvoices([...invRes.data].reverse());
-        } catch { addToast('Failed to load data', 'error'); }
+        const [productsResult, suppliersResult, invoicesResult] = await Promise.allSettled([
+            getProducts(),
+            getSuppliers(),
+            getPurchaseInvoices(),
+        ]);
+
+        if (productsResult.status === 'fulfilled') {
+            setProducts(productsResult.value.data);
+        } else {
+            addToast(getApiErrorMessage(productsResult.reason, 'Failed to load products'), 'error');
+        }
+
+        if (suppliersResult.status === 'fulfilled') {
+            setSuppliers(suppliersResult.value.data);
+        } else {
+            addToast(getApiErrorMessage(suppliersResult.reason, 'Failed to load suppliers'), 'error');
+        }
+
+        if (invoicesResult.status === 'fulfilled') {
+            setInvoices([...invoicesResult.value.data].reverse());
+        } else {
+            addToast(getApiErrorMessage(invoicesResult.reason, 'Failed to load purchase history'), 'error');
+        }
     }, [addToast]);
 
     useEffect(() => { load(); }, [load]);
@@ -242,7 +263,9 @@ export default function Purchases() {
         try {
             const res = await getPurchaseInvoice(id);
             setSelectedInvoice(res.data);
-        } catch { addToast('Failed to load details', 'error'); }
+        } catch (error) {
+            addToast(getApiErrorMessage(error, 'Failed to load purchase details'), 'error');
+        }
     };
 
     const totalAmount = items.reduce((s, it) => s + (it.line_total || 0), 0);

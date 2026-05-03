@@ -105,6 +105,10 @@ function getTotalQuantity(items = []) {
     return items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
 }
 
+function getApiErrorMessage(error, fallback) {
+    return error?.response?.data?.detail || error?.message || fallback;
+}
+
 export default function Sales() {
     const { addToast } = useToast();
     const [products, setProducts] = useState([]);
@@ -134,19 +138,35 @@ export default function Sales() {
     const productInputRefs = useRef([]);
 
     const load = useCallback(async () => {
-        try {
-            const [productsResponse, customersResponse, salesResponse, settingsResponse] = await Promise.all([
-                getProducts(),
-                getCustomers(),
-                getSales(),
-                getBusinessSettings(),
-            ]);
-            setProducts(productsResponse.data);
-            setCustomers(customersResponse.data);
-            setBills(salesResponse.data);
-            setSettings(settingsResponse.data);
-        } catch {
-            addToast('Failed to load data', 'error');
+        const [productsResult, customersResult, salesResult, settingsResult] = await Promise.allSettled([
+            getProducts(),
+            getCustomers(),
+            getSales(),
+            getBusinessSettings(),
+        ]);
+
+        if (productsResult.status === 'fulfilled') {
+            setProducts(productsResult.value.data);
+        } else {
+            addToast(getApiErrorMessage(productsResult.reason, 'Failed to load products'), 'error');
+        }
+
+        if (customersResult.status === 'fulfilled') {
+            setCustomers(customersResult.value.data);
+        } else {
+            addToast(getApiErrorMessage(customersResult.reason, 'Failed to load customers'), 'error');
+        }
+
+        if (salesResult.status === 'fulfilled') {
+            setBills(salesResult.value.data);
+        } else {
+            addToast(getApiErrorMessage(salesResult.reason, 'Failed to load bill history'), 'error');
+        }
+
+        if (settingsResult.status === 'fulfilled') {
+            setSettings(settingsResult.value.data);
+        } else {
+            addToast(getApiErrorMessage(settingsResult.reason, 'Failed to load business settings'), 'error');
         }
     }, [addToast]);
 
@@ -325,8 +345,8 @@ export default function Sales() {
         try {
             const response = await getSale(id);
             setSelectedBill(response.data);
-        } catch {
-            addToast('Failed to load details', 'error');
+        } catch (error) {
+            addToast(getApiErrorMessage(error, 'Failed to load bill details'), 'error');
         }
     };
 
