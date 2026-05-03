@@ -7,6 +7,10 @@ function createClientRequestId() {
     return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function getResponseRequestId(error) {
+    return error?.response?.headers?.['x-request-id'] || error?.response?.data?.request_id || null;
+}
+
 const api = axios.create({ baseURL: `${API_BASE_URL}/api/v1` });
 const auth = axios.create({ baseURL: `${API_BASE_URL}/auth` });
 
@@ -51,8 +55,8 @@ export const authAPI = {
     logout: () => auth.post('/logout'),
 };
 
-// Global 401 interceptor: redirect to login if token is rejected
-const on401 = (error) => {
+// Response interceptor: keep auth handling and surface request IDs for debugging.
+const onResponseError = (error) => {
     if (error?.response?.status === 401) {
         // Only redirect if it's not a login attempt itself
         if (!error?.config?.url?.includes('/login')) {
@@ -60,10 +64,22 @@ const on401 = (error) => {
             window.location.href = '/login';
         }
     }
+
+    const requestId = getResponseRequestId(error);
+    if (requestId || error?.response?.status >= 500) {
+        console.error('[API Error]', {
+            method: error?.config?.method?.toUpperCase?.() || error?.config?.method,
+            url: error?.config?.url,
+            status: error?.response?.status,
+            requestId,
+            detail: error?.response?.data?.detail || error?.message,
+        });
+    }
+
     return Promise.reject(error);
 };
-api.interceptors.response.use(res => res, on401);
-auth.interceptors.response.use(res => res, on401);
+api.interceptors.response.use(res => res, onResponseError);
+auth.interceptors.response.use(res => res, onResponseError);
 
 // Products
 export const getProducts = (include_archived = false) => api.get(`/products?include_archived=${include_archived}`);
