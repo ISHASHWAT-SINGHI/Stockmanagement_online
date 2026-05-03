@@ -83,7 +83,9 @@ function calcItem(it, priceIncludesTax = false) {
 }
 
 function getApiErrorMessage(error, fallback) {
-    return error?.response?.data?.detail || error?.message || fallback;
+    const message = error?.response?.data?.detail || error?.message || fallback;
+    const requestId = error?.response?.headers?.['x-request-id'] || error?.response?.data?.request_id;
+    return requestId ? `${message} (Ref: ${requestId})` : message;
 }
 
 function createClientRequestId() {
@@ -354,9 +356,7 @@ export default function Purchases() {
             purchaseDraftFingerprintRef.current = '';
             load();
         } catch (e) {
-            const message = e?.response?.data?.detail || 'Save failed';
-            const requestId = e?.response?.headers?.['x-request-id'];
-            addToast(requestId ? `${message} (Ref: ${requestId})` : message, 'error');
+            addToast(getApiErrorMessage(e, 'Save failed'), 'error');
         } finally {
             saveInFlightRef.current = false;
             setSaving(false);
@@ -408,8 +408,8 @@ export default function Purchases() {
                     )}
                 </div>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr)', gap: '1rem', alignItems: 'start' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div className="entry-layout">
+                    <div className="entry-main">
                         {/* Header fields */}
                         <div className="surface" style={{ padding: '1rem' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
@@ -460,8 +460,8 @@ export default function Purchases() {
                         </div>
 
                         {/* Items */}
-                        <div className="surface" style={{ overflow: 'visible' }}> 
-                            <div style={{ overflowX: 'visible' }}> 
+                        <div className="surface line-items-surface"> 
+                            <div className="line-items-scroll scrollbar"> 
                                 <table className="data-table" style={{ minWidth: 760 }}>
                                     <thead>
                                         <tr>
@@ -527,7 +527,8 @@ export default function Purchases() {
                     </div>
 
                     {/* Summary */}
-                    <div className="surface" style={{ padding: '1.25rem', position: 'sticky', top: 0 }}>
+                    <div className="entry-sidebar entry-sticky">
+                        <div className="surface" style={{ padding: '1.25rem' }}>
                         <p style={{ fontWeight: 700, marginBottom: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Invoice Summary</p>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {items.filter(it => it.product_id).map((it, i) => (
@@ -548,6 +549,7 @@ export default function Purchases() {
                         <button className="btn btn-primary" style={{ width: '100%', marginTop: '1.25rem', justifyContent: 'center' }} onClick={saveInvoice} disabled={saving}>
                             <Save size={15} /> {saving ? 'Saving…' : 'Save Invoice'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+↵</kbd>
                         </button>
+                        </div>
                     </div>
                 </div>
             )}

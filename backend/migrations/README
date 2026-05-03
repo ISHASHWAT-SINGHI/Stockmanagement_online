@@ -1,1 +1,7 @@
 Generic single-database configuration.
+
+Usage notes for this project:
+
+- Run migrations from the `backend` directory with `alembic upgrade head`.
+- Production schema changes must be applied before or during deploy; FastAPI startup `Base.metadata.create_all()` does not add new columns to existing PostgreSQL tables.
+- On Render, set a pre-deploy command like `cd backend && alembic upgrade head` so code and schema stay in sync.

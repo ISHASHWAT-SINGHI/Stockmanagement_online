@@ -106,7 +106,9 @@ function getTotalQuantity(items = []) {
 }
 
 function getApiErrorMessage(error, fallback) {
-    return error?.response?.data?.detail || error?.message || fallback;
+    const message = error?.response?.data?.detail || error?.message || fallback;
+    const requestId = error?.response?.headers?.['x-request-id'] || error?.response?.data?.request_id;
+    return requestId ? `${message} (Ref: ${requestId})` : message;
 }
 
 export default function Sales() {
@@ -460,7 +462,7 @@ export default function Sales() {
             resetBillForm();
             await load();
         } catch (error) {
-            addToast(error?.response?.data?.detail || 'Failed to save bill', 'error');
+            addToast(getApiErrorMessage(error, 'Failed to save bill'), 'error');
         } finally {
             setSaving(false);
         }
@@ -579,8 +581,8 @@ export default function Sales() {
                     )}
                 </div>
             ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) minmax(0,1fr)', gap: '1rem', alignItems: 'start' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div className="entry-layout">
+                    <div className="entry-main">
                         <div className="surface" style={{ padding: '1rem', position: 'relative', zIndex: 10 }}>
                             <div className="form-group">
                                 <label className="form-label">Customer (optional)</label>
@@ -614,8 +616,8 @@ export default function Sales() {
                             )}
                         </div>
 
-                        <div className="surface" style={{ overflow: 'visible', zIndex: 5 }}>
-                            <div style={{ overflowX: 'visible' }}>
+                        <div className="surface line-items-surface" style={{ zIndex: 5 }}>
+                            <div className="line-items-scroll scrollbar">
                                 <table className="data-table" style={{ minWidth: 820 }}>
                                     <thead>
                                         <tr>
@@ -708,7 +710,7 @@ export default function Sales() {
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'sticky', top: 0 }}>
+                    <div className="entry-sidebar entry-sticky">
                         <div className="surface" style={{ padding: '1.25rem' }}>
                             <div className="form-group" style={{ marginBottom: '1rem' }}>
                                 <label className="form-label">Bill Date</label>
