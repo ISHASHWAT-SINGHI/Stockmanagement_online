@@ -28,14 +28,15 @@ export default function Navbar({ onSearch }) {
 
     return (
         <header style={{
-            height: 56, display: 'flex', alignItems: 'center', gap: '1rem',
+            height: 'var(--topbar-height)', display: 'flex', alignItems: 'center', gap: '1rem',
             padding: '0 1.25rem',
-            background: 'var(--bg-surface)',
-            borderBottom: '1px solid var(--border)',
+            background: 'color-mix(in oklch, var(--surface-1) 88%, black 12%)',
+            borderBottom: '1px solid var(--line-soft)',
+            boxShadow: '0 10px 32px rgb(0 0 0 / 0.12)',
             flexShrink: 0,
         }}>
             {/* Page title */}
-            <h1 style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+            <h1 style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-strong)', whiteSpace: 'nowrap', letterSpacing: '-0.02em' }}>
                 {title}
             </h1>
 

@@ -17,7 +17,7 @@ export default function MainLayout() {
     const [searchQuery, setSearchQuery] = useState('');
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <div className="app-shell" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
             {/* Main row: Sidebar + content */}
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
                 <Sidebar />
@@ -30,8 +30,8 @@ export default function MainLayout() {
                         overflowY: 'auto',
                         overflowX: 'hidden',
                         padding: '1.25rem 1.25rem 1.25rem',
-                        background: 'var(--bg-base)',
-                    }}>
+                        background: 'var(--canvas)',
+                    }} className="scrollbar">
                         <Outlet context={{ searchQuery }} />
                     </main>
                 </div>
