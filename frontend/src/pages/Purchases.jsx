@@ -375,7 +375,7 @@ export default function Purchases() {
                     ))}
                 </div>
                 {view === 'new' && (
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div className="page-header-actions">
                         <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
                         <button className="btn btn-primary" onClick={saveInvoice} disabled={saving}>
                             <Save size={14} /> {saving ? 'Saving…' : 'Save Invoice'} <kbd className="kbd">Alt+↵</kbd>
@@ -408,29 +408,32 @@ export default function Purchases() {
                     )}
                 </div>
             ) : (
-                <div className="entry-layout">
+                <div className="entry-layout purchase-entry-layout">
                     <div className="entry-main">
-                        {/* Header fields */}
                         <div className="surface" style={{ padding: '1rem' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
-                                {/* Supplier */}
-                                <div className="form-group" style={{ position: 'relative', gridColumn: '1 / span 2' }}>
+                            <div className="entry-info-grid purchase-info-grid">
+                                <div className="form-group entry-span-2" style={{ position: 'relative' }}>
                                     <label className="form-label">Supplier *</label>
-                                    <input value={supplierSearch} onChange={e => handleSupplierSearch(e.target.value)}
+                                    <input
+                                        value={supplierSearch}
+                                        onChange={e => handleSupplierSearch(e.target.value)}
                                         onKeyDown={onSupplierKeyDown}
                                         onBlur={() => window.setTimeout(() => commitSupplierMatch(supplierSearch), 120)}
-                                        placeholder="Search supplier…" autoComplete="off" />
+                                        placeholder="Search supplier..."
+                                        autoComplete="off"
+                                    />
                                     {supplierSuggestions.length > 0 && (
-                                        <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 100, listStyle: 'none', margin: '2px 0', maxHeight: 180, overflowY: 'auto' }}>
+                                        <ul className="line-item-suggestions scrollbar">
                                             {supplierSuggestions.map((s, idx) => (
-                                                <li key={s.id}
+                                                <li
+                                                    key={s.id}
                                                     onMouseDown={() => { setSupplierId(s.id); setSupplierSearch(s.company_name); setSupplierSuggestions([]); }}
-                                                    style={{ 
-                                                        padding: '0.55rem 0.85rem', cursor: 'pointer', fontSize: '0.85rem',
-                                                        background: idx === supplierSuggestIndex ? 'var(--bg-hover)' : 'transparent'
-                                                    }}
                                                     onMouseEnter={() => setSupplierSuggestIndex(idx)}
-                                                >{s.company_name}</li>
+                                                    className="line-item-suggestion"
+                                                    style={{ background: idx === supplierSuggestIndex ? 'var(--bg-hover)' : 'transparent' }}
+                                                >
+                                                    <span>{s.company_name}</span>
+                                                </li>
                                             ))}
                                         </ul>
                                     )}
@@ -445,51 +448,66 @@ export default function Purchases() {
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Price Type</label>
-                                    <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
-                                        <button className="btn btn-sm" onClick={() => { setPriceIncludesTax(false); setItems(prev => prev.map(it => calcItem(it, false))); }} style={{ flex: 1, borderRadius: 0, padding: '0.4rem 0.5rem', background: !priceIncludesTax ? 'var(--accent)' : 'var(--bg-elevated)', color: !priceIncludesTax ? '#fff' : 'var(--text-muted)', border: 'none' }}>Exclusive</button>
-                                        <button className="btn btn-sm" onClick={() => { setPriceIncludesTax(true); setItems(prev => prev.map(it => calcItem(it, true))); }} style={{ flex: 1, borderRadius: 0, padding: '0.4rem 0.5rem', background: priceIncludesTax ? 'var(--accent)' : 'var(--bg-elevated)', color: priceIncludesTax ? '#fff' : 'var(--text-muted)', border: 'none' }}>Inclusive</button>
+                                    <div className="segment-control">
+                                        <button className={`segment-control__button ${!priceIncludesTax ? 'is-active' : ''}`} onClick={() => { setPriceIncludesTax(false); setItems(prev => prev.map(it => calcItem(it, false))); }}>
+                                            Exclusive
+                                        </button>
+                                        <button className={`segment-control__button ${priceIncludesTax ? 'is-active' : ''}`} onClick={() => { setPriceIncludesTax(true); setItems(prev => prev.map(it => calcItem(it, true))); }}>
+                                            Inclusive
+                                        </button>
                                     </div>
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Unit Price Mode</label>
-                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem', paddingTop: '0.55rem' }}>
-                                        {priceIncludesTax ? 'Enter price including GST; the invoice stores the computed base unit price.' : 'Enter base price before GST; GST is added to each line total.'}
-                                    </div>
+                                    <span className="line-item-secondary">
+                                        {priceIncludesTax ? 'Enter the GST-inclusive price. The stored unit price is back-calculated.' : 'Enter the base unit price. GST is added into each row total.'}
+                                    </span>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Items */}
-                        <div className="surface line-items-surface"> 
-                            <div className="line-items-scroll scrollbar"> 
-                                <table className="data-table" style={{ minWidth: 760 }}>
-                                    <thead>
-                                        <tr>
-                                            <th style={{ minWidth: 220 }}>Product</th>
-                                            <th style={{ width: 120 }}>Qty</th>
-                                            <th style={{ width: 160 }}>{priceIncludesTax ? 'Unit Price (Incl.)' : 'Unit Price'}</th>
-                                            <th style={{ width: 110 }}>GST%</th>
-                                            <th style={{ textAlign: 'right', width: 140 }}>Line Total</th>
-                                            <th style={{ width: 40 }}></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {items.map((it, i) => (
-                                            <tr key={i}>
-                                                <td style={{ position: 'relative' }}>
-                                                    <input ref={el => productInputRefs.current[i] = el} value={it.product_name} onChange={e => handleProductSearch(i, e.target.value)}
+                        <div className="surface line-items-surface">
+                            <div className="line-items-header">
+                                <div>
+                                    <p className="line-items-title">Invoice Items</p>
+                                    <p className="line-items-subtitle">Only the essential columns stay visible so product entry always fits inside the page.</p>
+                                </div>
+                                <div className="line-items-actions">
+                                    <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
+                                </div>
+                            </div>
+                            <div className="line-items-list">
+                                <div className="line-items-head line-item-grid purchase-line-item-grid">
+                                    <div className="line-item-head">Product</div>
+                                    <div className="line-item-head">Qty</div>
+                                    <div className="line-item-head">Unit Price</div>
+                                    <div className="line-item-head">GST</div>
+                                    <div className="line-item-head line-item-head--amount">Amount</div>
+                                    <div className="line-item-head line-item-head--action" aria-hidden="true"> </div>
+                                </div>
+                                {items.map((it, i) => {
+                                    const currentProduct = products.find(product => product.id === it.product_id);
+                                    return (
+                                        <div key={i} className="line-item-row line-item-grid purchase-line-item-grid">
+                                            <div className="line-item-cell line-item-cell--product">
+                                                <span className="line-item-cell-label">Product</span>
+                                                <div className="line-item-product">
+                                                    <input
+                                                        ref={el => productInputRefs.current[i] = el}
+                                                        value={it.product_name}
+                                                        onChange={e => handleProductSearch(i, e.target.value)}
                                                         onKeyDown={e => onProductKeyDown(e, i)}
                                                         onBlur={() => window.setTimeout(() => commitProductMatch(i, it.product_name), 120)}
-                                                        placeholder="Type product…" style={{ fontSize: '0.82rem' }} autoComplete="off" />
+                                                        placeholder="Type product..."
+                                                        style={{ fontSize: '0.82rem' }}
+                                                        autoComplete="off"
+                                                    />
                                                     {productSuggestions.index === i && productSuggestions.list.length > 0 && (
-                                                        <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 9999, listStyle: 'none', margin: '2px 0', maxHeight: 200, overflowY: 'auto' }}>
+                                                        <ul className="line-item-suggestions scrollbar">
                                                             {productSuggestions.list.map((p, idx) => (
-                                                                <li key={p.id} onMouseDown={() => selectProduct(i, p)}
-                                                                    style={{ 
-                                                                        padding: '0.55rem 0.85rem', cursor: 'pointer', fontSize: '0.82rem', display: 'flex', justifyContent: 'space-between',
-                                                                        background: idx === productSuggestions.activeIdx ? 'var(--bg-hover)' : 'transparent'
-                                                                    }}
+                                                                <li
+                                                                    key={p.id}
+                                                                    onMouseDown={() => selectProduct(i, p)}
                                                                     onMouseEnter={() => setProductSuggestions(s => ({ ...s, activeIdx: idx }))}
+                                                                    className="line-item-suggestion"
+                                                                    style={{ background: idx === productSuggestions.activeIdx ? 'var(--bg-hover)' : 'transparent' }}
                                                                 >
                                                                     <span>{p.brand_name ? <strong>{p.brand_name} </strong> : ''}{p.product_name}</span>
                                                                     <span className="badge badge-muted">{p.current_stock}</span>
@@ -497,64 +515,83 @@ export default function Purchases() {
                                                             ))}
                                                         </ul>
                                                     )}
-                                                </td>
-                                                <td>
-                                                    <input ref={el => itemRefs.current[i] = el} type="number" min={1} value={it.quantity}
-                                                        onChange={e => updateItem(i, 'quantity', +e.target.value)} style={{ fontSize: '0.82rem' }}
-                                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addRow(true); } }} />
-                                                </td>
-                                                <td>
-                                                    <input type="number" min={0} step={0.01} value={it.unit_price}
-                                                        onChange={e => updateItem(i, 'unit_price', +e.target.value)} style={{ fontSize: '0.82rem' }} />
-                                                </td>
-                                                <td>
-                                                    <select value={it.gst_percent} onChange={e => updateItem(i, 'gst_percent', +e.target.value)} onKeyDown={e => onTaxFieldKeyDown(e, i)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
-                                                        {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}%</option>)}
-                                                    </select>
-                                                </td>
-                                                <td style={{ textAlign: 'right', fontWeight: 600, fontSize: '0.85rem' }}>₹{it.line_total.toFixed(2)}</td>
-                                                <td>
-                                                    <button className="btn-icon" onClick={() => removeRow(i)} disabled={items.length === 1} style={{ opacity: items.length === 1 ? 0.3 : 1 }}>
+                                                </div>
+                                                <span className="line-item-secondary">
+                                                    {currentProduct ? `Current stock: ${currentProduct.current_stock ?? 0}` : 'Search by product or brand name.'}
+                                                </span>
+                                            </div>
+                                            <div className="line-item-cell">
+                                                <span className="line-item-cell-label">Qty</span>
+                                                <input
+                                                    ref={el => itemRefs.current[i] = el}
+                                                    type="number"
+                                                    min={1}
+                                                    value={it.quantity}
+                                                    onChange={e => updateItem(i, 'quantity', +e.target.value)}
+                                                    style={{ fontSize: '0.82rem' }}
+                                                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addRow(true); } }}
+                                                />
+                                            </div>
+                                            <div className="line-item-cell">
+                                                <span className="line-item-cell-label">Unit Price</span>
+                                                <input type="number" min={0} step={0.01} value={it.unit_price} onChange={e => updateItem(i, 'unit_price', +e.target.value)} style={{ fontSize: '0.82rem' }} />
+                                            </div>
+                                            <div className="line-item-cell">
+                                                <span className="line-item-cell-label">GST</span>
+                                                <select value={it.gst_percent} onChange={e => updateItem(i, 'gst_percent', +e.target.value)} onKeyDown={e => onTaxFieldKeyDown(e, i)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
+                                                    {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}%</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="line-item-cell line-item-cell--amount">
+                                                <span className="line-item-cell-label">Amount</span>
+                                                <div className="line-item-amount-box">
+                                                    <span className="line-item-total">{`₹${it.line_total.toFixed(2)}`}</span>
+                                                </div>
+                                            </div>
+                                            <div className="line-item-cell line-item-cell--action">
+                                                <span className="line-item-cell-label">Remove</span>
+                                                <div className="line-item-action-box">
+                                                    <button className="btn-icon line-item-remove" onClick={() => removeRow(i)} disabled={items.length === 1} style={{ opacity: items.length === 1 ? 0.3 : 1 }}>
                                                         <Trash2 size={13} color="var(--danger)" />
                                                     </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
 
-                    {/* Summary */}
                     <div className="entry-sidebar entry-sticky">
-                        <div className="surface" style={{ padding: '1.25rem' }}>
-                        <p style={{ fontWeight: 700, marginBottom: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Invoice Summary</p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            {items.filter(it => it.product_id).map((it, i) => (
-                                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>{it.product_name}</span>
-                                    <span>×{it.quantity} = ₹{it.line_total.toFixed(2)}</span>
+                        <div className="surface summary-card">
+                            <p className="summary-title">Invoice Summary</p>
+                            <div className="summary-grid">
+                                <div className="summary-row"><span>Mapped Items</span><span>{items.filter(it => it.product_id).length}</span></div>
+                                <div className="summary-row"><span>Total Qty</span><span>{totalQuantity}</span></div>
+                                <div className="summary-row"><span>Price Type</span><span>{priceIncludesTax ? 'Inclusive' : 'Exclusive'}</span></div>
+                                <div className="summary-row summary-row--total">
+                                    <span>Grand Total</span>
+                                    <span style={{ color: 'var(--accent)' }}>{`₹${totalAmount.toFixed(2)}`}</span>
                                 </div>
-                            ))}
+                            </div>
+                            <div className="summary-note">The summary only stays beside the form on roomy screens. On tighter layouts it stacks below to protect line-item width.</div>
+                            <div className="summary-actions">
+                                <button className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={saveInvoice} disabled={saving}>
+                                    <Save size={15} /> {saving ? 'Saving...' : 'Save Invoice'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+Enter</kbd>
+                                </button>
+                            </div>
                         </div>
-                        <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                            <span>Total Qty</span>
-                            <span>{totalQuantity}</span>
-                        </div>
-                        <div style={{ borderTop: '1px solid var(--border)', marginTop: '0.75rem', paddingTop: '0.75rem', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.1rem' }}>
-                            <span>Total</span>
-                            <span style={{ color: 'var(--accent)' }}>₹{totalAmount.toFixed(2)}</span>
-                        </div>
-                        <button className="btn btn-primary" style={{ width: '100%', marginTop: '1.25rem', justifyContent: 'center' }} onClick={saveInvoice} disabled={saving}>
-                            <Save size={15} /> {saving ? 'Saving…' : 'Save Invoice'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+↵</kbd>
-                        </button>
+
+                        <div className="surface shortcut-panel">
+                            <p style={{ marginBottom: '0.3rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Keyboard shortcuts</p>
+                            <p><kbd className="kbd">Tab</kbd> - move between fields and pick suggestions</p>
+                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+N</kbd> - add item row</p>
+                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+Enter</kbd> - save invoice</p>
                         </div>
                     </div>
                 </div>
             )}
-
-            {/* Invoice Details Modal */}
             {selectedInvoice && (
                 <Modal title={`Invoice Details: ${selectedInvoice.invoice_number}`} onClose={() => setSelectedInvoice(null)} footer={<button className="btn btn-ghost" onClick={() => setSelectedInvoice(null)}>Close</button>}>
                     <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>

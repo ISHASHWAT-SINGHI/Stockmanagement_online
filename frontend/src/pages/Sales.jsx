@@ -407,6 +407,9 @@ export default function Sales() {
 
     const totals = calcBill(items.filter(item => item.product_id), discountAmt, isDiscountPercent);
     const totalQuantity = getTotalQuantity(items.filter(item => item.product_id));
+    const totalTax = +(totals.cgst + totals.sgst).toFixed(2);
+    const paidAmountValue = paidAmt === '' ? totals.grand : Number(paidAmt) || 0;
+    const outstandingAmount = Math.max(0, totals.grand - paidAmountValue);
 
     const saveBill = async () => {
         const preparedItems = resolveItemsForSave();
@@ -529,7 +532,7 @@ export default function Sales() {
                     ))}
                 </div>
                 {view === 'new' && (
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div className="page-header-actions">
                         {editingBillId && (
                             <button className="btn btn-ghost btn-sm" onClick={resetBillForm}>Cancel Edit</button>
                         )}
@@ -581,232 +584,251 @@ export default function Sales() {
                     )}
                 </div>
             ) : (
-                <div className="entry-layout">
+                <div className="entry-layout sales-entry-layout">
                     <div className="entry-main">
                         <div className="surface" style={{ padding: '1rem', position: 'relative', zIndex: 10 }}>
-                            <div className="form-group">
-                                <label className="form-label">Customer (optional)</label>
-                                <input
-                                    value={customerSearch}
-                                    onChange={event => handleCustomerSearch(event.target.value)}
-                                    onKeyDown={onCustomerKeyDown}
-                                    placeholder="Search by name or phone…"
-                                    autoComplete="off"
-                                />
+                            <div className="entry-info-grid">
+                                <div className="form-group entry-span-2" style={{ position: 'relative' }}>
+                                    <label className="form-label">Customer (optional)</label>
+                                    <input
+                                        value={customerSearch}
+                                        onChange={event => handleCustomerSearch(event.target.value)}
+                                        onKeyDown={onCustomerKeyDown}
+                                        placeholder="Search by name or phone..."
+                                        autoComplete="off"
+                                    />
+                                    {customerSuggestions.length > 0 && (
+                                        <ul className="line-item-suggestions scrollbar">
+                                            {customerSuggestions.map((customer, index) => (
+                                                <li
+                                                    key={customer.id}
+                                                    onMouseDown={() => selectCustomer(customer)}
+                                                    onMouseEnter={() => setCustomerSuggestIndex(index)}
+                                                    className="line-item-suggestion"
+                                                    style={{ background: index === customerSuggestIndex ? 'var(--bg-hover)' : 'transparent' }}
+                                                >
+                                                    <span>
+                                                        <strong>{customer.name}</strong>
+                                                        {customer.phone && <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>{customer.phone}</span>}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Bill Date</label>
+                                    <input type="date" value={billDate} onChange={event => setBillDate(event.target.value)} />
+                                </div>
+                                {editingBillId && (
+                                    <div className="entry-info-note entry-span-full">
+                                        Editing an existing bill. The bill number stays the same and a new revision is saved.
+                                    </div>
+                                )}
                             </div>
-                            {customerSuggestions.length > 0 && (
-                                <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 50, listStyle: 'none', margin: '2px 0' }}>
-                                    {customerSuggestions.map((customer, index) => (
-                                        <li
-                                            key={customer.id}
-                                            onMouseDown={() => selectCustomer(customer)}
-                                            onMouseEnter={() => setCustomerSuggestIndex(index)}
-                                            style={{
-                                                padding: '0.6rem 1rem',
-                                                cursor: 'pointer',
-                                                fontSize: '0.85rem',
-                                                background: index === customerSuggestIndex ? 'var(--bg-hover)' : 'transparent',
-                                            }}
-                                        >
-                                            <strong>{customer.name}</strong>
-                                            {customer.phone && <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>{customer.phone}</span>}
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
                         </div>
 
                         <div className="surface line-items-surface" style={{ zIndex: 5 }}>
-                            <div className="line-items-scroll scrollbar">
-                                <table className="data-table" style={{ minWidth: 820 }}>
-                                    <thead>
-                                        <tr>
-                                            <th style={{ minWidth: 220 }}>Product</th>
-                                            <th style={{ width: 120 }}>Qty</th>
-                                            <th style={{ width: 150 }}>Price</th>
-                                            <th style={{ width: 100 }}>GST%</th>
-                                            <th style={{ width: 100 }}>Disc%</th>
-                                            <th style={{ textAlign: 'right', width: 130 }}>Amount</th>
-                                            <th style={{ width: 40 }} />
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {items.map((item, index) => (
-                                            <tr key={index}>
-                                                <td style={{ position: 'relative' }}>
-                                                    <input
-                                                        ref={element => { productInputRefs.current[index] = element; }}
-                                                        value={item.product_name}
-                                                        onChange={event => handleProductSearch(index, event.target.value)}
-                                                        onKeyDown={event => onProductKeyDown(event, index)}
-                                                        onBlur={() => window.setTimeout(() => commitProductMatch(index, item.product_name), 120)}
-                                                        placeholder="Type product name…"
-                                                        style={{ fontSize: '0.82rem' }}
-                                                        autoComplete="off"
-                                                    />
-                                                    {productSuggestions.index === index && productSuggestions.list.length > 0 && (
-                                                        <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 100, listStyle: 'none', margin: '2px 0', maxHeight: 200, overflowY: 'auto' }}>
-                                                            {productSuggestions.list.map((product, suggestionIndex) => (
-                                                                <li
-                                                                    key={product.id}
-                                                                    onMouseDown={() => applyProductSelection(index, product)}
-                                                                    onMouseEnter={() => setProductSuggestions(suggestions => ({ ...suggestions, activeIdx: suggestionIndex }))}
-                                                                    style={{
-                                                                        padding: '0.55rem 0.85rem',
-                                                                        cursor: 'pointer',
-                                                                        fontSize: '0.82rem',
-                                                                        display: 'flex',
-                                                                        justifyContent: 'space-between',
-                                                                        background: suggestionIndex === productSuggestions.activeIdx ? 'var(--bg-hover)' : 'transparent',
-                                                                    }}
-                                                                >
-                                                                    <span>{product.brand_name ? <strong>{product.brand_name} </strong> : ''}{product.product_name}</span>
-                                                                    <span className={`badge ${product.current_stock < 5 ? 'badge-warning' : 'badge-muted'}`}>{product.current_stock}</span>
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        ref={element => { itemRefs.current[index] = element; }}
-                                                        type="number"
-                                                        min={1}
-                                                        value={item.quantity}
-                                                        onChange={event => updateItem(index, 'quantity', +event.target.value)}
-                                                        style={{ fontSize: '0.82rem' }}
-                                                        onKeyDown={event => {
-                                                            if (event.key === 'Enter') {
-                                                                event.preventDefault();
-                                                                if (index === items.length - 1) addRow(true);
-                                                            }
-                                                        }}
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input type="number" min={0} step={0.01} value={item.selling_price} onChange={event => updateItem(index, 'selling_price', +event.target.value)} style={{ fontSize: '0.82rem' }} />
-                                                </td>
-                                                <td>
-                                                    <select value={item.gst_percent} onChange={event => updateItem(index, 'gst_percent', +event.target.value)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
-                                                        {GST_RATES.map(rate => <option key={rate} value={rate}>{rate}%</option>)}
-                                                    </select>
-                                                </td>
-                                                <td>
-                                                    <input type="number" min={0} max={100} value={item.discount_percent} onChange={event => updateItem(index, 'discount_percent', +event.target.value)} onKeyDown={event => onLastEditableFieldKeyDown(event, index)} style={{ fontSize: '0.82rem' }} />
-                                                </td>
-                                                <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
-                                                    ₹{item.final_amount.toFixed(2)}
-                                                </td>
-                                                <td>
-                                                    <button className="btn-icon" onClick={() => removeRow(index)} title="Remove row" style={{ opacity: items.length === 1 ? 0.3 : 1 }} disabled={items.length === 1}>
-                                                        <Trash2 size={13} color="var(--danger)" />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                            <div className="line-items-header">
+                                <div>
+                                    <p className="line-items-title">Bill Items</p>
+                                    <p className="line-items-subtitle">Keep product entry full-width. Rows may grow taller, but they never push the page sideways.</p>
+                                </div>
+                                <div className="line-items-actions">
+                                    <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}>
+                                        <Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd>
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="line-items-list">
+                                <div className="line-items-head line-item-grid sales-line-item-grid">
+                                    <div className="line-item-head">Product</div>
+                                    <div className="line-item-head">Qty</div>
+                                    <div className="line-item-head">Price</div>
+                                    <div className="line-item-head">GST</div>
+                                    <div className="line-item-head">Disc</div>
+                                    <div className="line-item-head line-item-head--amount">Amount</div>
+                                    <div className="line-item-head line-item-head--action" aria-hidden="true"> </div>
+                                </div>
+                                {items.map((item, index) => (
+                                    <div key={index} className="line-item-row line-item-grid sales-line-item-grid">
+                                        <div className="line-item-cell line-item-cell--product">
+                                            <span className="line-item-cell-label">Product</span>
+                                            <div className="line-item-product">
+                                                <input
+                                                    ref={element => { productInputRefs.current[index] = element; }}
+                                                    value={item.product_name}
+                                                    onChange={event => handleProductSearch(index, event.target.value)}
+                                                    onKeyDown={event => onProductKeyDown(event, index)}
+                                                    onBlur={() => window.setTimeout(() => commitProductMatch(index, item.product_name), 120)}
+                                                    placeholder="Type product name..."
+                                                    style={{ fontSize: '0.82rem' }}
+                                                    autoComplete="off"
+                                                />
+                                                {productSuggestions.index === index && productSuggestions.list.length > 0 && (
+                                                    <ul className="line-item-suggestions scrollbar">
+                                                        {productSuggestions.list.map((product, suggestionIndex) => (
+                                                            <li
+                                                                key={product.id}
+                                                                onMouseDown={() => applyProductSelection(index, product)}
+                                                                onMouseEnter={() => setProductSuggestions(suggestions => ({ ...suggestions, activeIdx: suggestionIndex }))}
+                                                                className="line-item-suggestion"
+                                                                style={{ background: suggestionIndex === productSuggestions.activeIdx ? 'var(--bg-hover)' : 'transparent' }}
+                                                            >
+                                                                <span>{product.brand_name ? <strong>{product.brand_name} </strong> : ''}{product.product_name}</span>
+                                                                <span className={`badge ${product.current_stock < 5 ? 'badge-warning' : 'badge-muted'}`}>{product.current_stock}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                            <span className="line-item-secondary">
+                                                {item.product_id ? `Available stock: ${item.available}` : 'Search by brand or product name.'}
+                                            </span>
+                                        </div>
+                                        <div className="line-item-cell">
+                                            <span className="line-item-cell-label">Qty</span>
+                                            <input
+                                                ref={element => { itemRefs.current[index] = element; }}
+                                                type="number"
+                                                min={1}
+                                                value={item.quantity}
+                                                onChange={event => updateItem(index, 'quantity', +event.target.value)}
+                                                style={{ fontSize: '0.82rem' }}
+                                                onKeyDown={event => {
+                                                    if (event.key === 'Enter') {
+                                                        event.preventDefault();
+                                                        if (index === items.length - 1) addRow(true);
+                                                    }
+                                                }}
+                                            />
+                                        </div>
+                                        <div className="line-item-cell">
+                                            <span className="line-item-cell-label">Price</span>
+                                            <input type="number" min={0} step={0.01} value={item.selling_price} onChange={event => updateItem(index, 'selling_price', +event.target.value)} style={{ fontSize: '0.82rem' }} />
+                                        </div>
+                                        <div className="line-item-cell">
+                                            <span className="line-item-cell-label">GST</span>
+                                            <select value={item.gst_percent} onChange={event => updateItem(index, 'gst_percent', +event.target.value)} style={{ fontSize: '0.82rem', padding: '0.4rem 0.5rem' }}>
+                                                {GST_RATES.map(rate => <option key={rate} value={rate}>{rate}%</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="line-item-cell">
+                                            <span className="line-item-cell-label">Disc</span>
+                                            <input type="number" min={0} max={100} value={item.discount_percent} onChange={event => updateItem(index, 'discount_percent', +event.target.value)} onKeyDown={event => onLastEditableFieldKeyDown(event, index)} style={{ fontSize: '0.82rem' }} />
+                                        </div>
+                                        <div className="line-item-cell line-item-cell--amount">
+                                            <span className="line-item-cell-label">Amount</span>
+                                            <div className="line-item-amount-box">
+                                                <span className="line-item-total">{`₹${item.final_amount.toFixed(2)}`}</span>
+                                            </div>
+                                        </div>
+                                        <div className="line-item-cell line-item-cell--action">
+                                            <span className="line-item-cell-label">Remove</span>
+                                            <div className="line-item-action-box">
+                                                <button className="btn-icon line-item-remove" onClick={() => removeRow(index)} title="Remove row" style={{ opacity: items.length === 1 ? 0.3 : 1 }} disabled={items.length === 1}>
+                                                    <Trash2 size={13} color="var(--danger)" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
 
                     <div className="entry-sidebar entry-sticky">
-                        <div className="surface" style={{ padding: '1.25rem' }}>
-                            <div className="form-group" style={{ marginBottom: '1rem' }}>
-                                <label className="form-label">Bill Date</label>
-                                <input type="date" value={billDate} onChange={event => setBillDate(event.target.value)} />
-                            </div>
-                            {editingBillId && (
-                                <div style={{ marginBottom: '1rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                                    Editing an existing bill. The bill number stays the same and a new revision is saved.
-                                </div>
-                            )}
-                            <p style={{ fontWeight: 700, marginBottom: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Bill Summary</p>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.875rem' }}>
-                                {[
-                                    ['Total Qty', totalQuantity],
-                                    ['Subtotal', `₹${totals.subtotal.toFixed(2)}`],
-                                    ['Extra Discount', `-₹${totals.extraDiscountValue.toFixed(2)}`],
-                                    ['Taxable', `₹${totals.taxable.toFixed(2)}`],
-                                    ['CGST', `₹${totals.cgst.toFixed(2)}`],
-                                    ['SGST', `₹${totals.sgst.toFixed(2)}`],
-                                ].map(([label, value]) => (
-                                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                                        <span>{label}</span><span>{value}</span>
-                                    </div>
-                                ))}
-                                <div style={{ borderTop: '1px solid var(--border)', marginTop: '0.5rem', paddingTop: '0.5rem', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.2rem' }}>
+                        <div className="surface summary-card">
+                            <p className="summary-title">Bill Summary</p>
+                            <div className="summary-grid">
+                                <div className="summary-row"><span>Total Qty</span><span>{totalQuantity}</span></div>
+                                <div className="summary-row"><span>Subtotal</span><span>{`₹${totals.subtotal.toFixed(2)}`}</span></div>
+                                <div className="summary-row"><span>Discount</span><span>{`-₹${totals.extraDiscountValue.toFixed(2)}`}</span></div>
+                                <div className="summary-row"><span>Tax</span><span>{`₹${totalTax.toFixed(2)}`}</span></div>
+                                <div className="summary-row summary-row--total">
                                     <span>Grand Total</span>
-                                    <div style={{ textAlign: 'right' }}>
-                                        <div style={{ color: 'var(--accent)' }}>₹{totals.grand.toFixed(2)}</div>
-                                        {Math.abs(totals.grand - totals.grandExact) > 0.001 && (
-                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>Exact: ₹{totals.grandExact.toFixed(2)}</div>
-                                        )}
-                                    </div>
+                                    <span style={{ color: 'var(--accent)' }}>{`₹${totals.grand.toFixed(2)}`}</span>
                                 </div>
                             </div>
+                            {Math.abs(totals.grand - totals.grandExact) > 0.001 && (
+                                <div className="summary-note">Exact total before rounding: {`₹${totals.grandExact.toFixed(2)}`}</div>
+                            )}
 
-                            <div className="form-group" style={{ marginTop: '1rem' }}>
+                            <div className="form-group">
                                 <label className="form-label">Extra Discount</label>
                                 <div style={{ display: 'flex', gap: '0.4rem' }}>
                                     <input type="number" min={0} value={discountAmt} onChange={event => setDiscountAmt(+event.target.value)} style={{ flex: 1 }} />
-                                    <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
-                                        <button className="btn btn-sm" onClick={event => { event.preventDefault(); setIsDiscountPercent(false); }} style={{ borderRadius: 0, padding: '0 0.5rem', background: !isDiscountPercent ? 'var(--accent)' : 'var(--bg-elevated)', color: !isDiscountPercent ? '#fff' : 'var(--text-muted)' }}>₹</button>
-                                        <button className="btn btn-sm" onClick={event => { event.preventDefault(); setIsDiscountPercent(true); }} style={{ borderRadius: 0, padding: '0 0.5rem', background: isDiscountPercent ? 'var(--accent)' : 'var(--bg-elevated)', color: isDiscountPercent ? '#fff' : 'var(--text-muted)' }}>%</button>
+                                    <div className="segment-control" style={{ width: '8rem' }}>
+                                        <button className={`segment-control__button ${!isDiscountPercent ? 'is-active' : ''}`} onClick={event => { event.preventDefault(); setIsDiscountPercent(false); }}>
+                                            Rs.
+                                        </button>
+                                        <button className={`segment-control__button ${isDiscountPercent ? 'is-active' : ''}`} onClick={event => { event.preventDefault(); setIsDiscountPercent(true); }}>
+                                            %
+                                        </button>
                                     </div>
                                 </div>
                             </div>
 
-                            <div style={{ marginTop: '1rem' }}>
-                                <p className="form-label" style={{ marginBottom: '0.4rem' }}>Payment Mode</p>
-                                <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                    {['Cash', 'UPI', 'Credit'].map(mode => (
-                                        <button
-                                            key={mode}
-                                            onClick={() => setPaymentMode(mode)}
-                                            className="btn btn-sm"
-                                            style={{
-                                                flex: 1,
-                                                background: paymentMode === mode ? 'var(--accent)' : 'var(--bg-elevated)',
-                                                color: paymentMode === mode ? '#fff' : 'var(--text-muted)',
-                                                border: `1px solid ${paymentMode === mode ? 'var(--accent)' : 'var(--border)'}`,
-                                            }}
-                                        >
-                                            {mode}
-                                        </button>
-                                    ))}
+                            <details className="compact-details">
+                                <summary>Payment</summary>
+                                <div className="compact-details__content">
+                                    <div className="payment-grid">
+                                        <div className="form-group">
+                                            <label className="form-label">Payment Mode</label>
+                                            <div className="segment-control segment-control--triple">
+                                                {['Cash', 'UPI', 'Credit'].map(mode => (
+                                                    <button
+                                                        key={mode}
+                                                        onClick={() => setPaymentMode(mode)}
+                                                        className={`segment-control__button ${paymentMode === mode ? 'is-active' : ''}`}
+                                                    >
+                                                        {mode}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Paid Amount</label>
+                                            <input type="number" min={0} value={paidAmt} onChange={event => setPaidAmt(event.target.value)} placeholder={totals.grand.toFixed(2)} />
+                                        </div>
+                                    </div>
+                                    {paidAmt !== '' && (
+                                        <div className="summary-row">
+                                            <span>Outstanding</span>
+                                            <strong style={{ color: outstandingAmount > 0 ? 'var(--danger)' : 'var(--success)' }}>
+                                                {`₹${outstandingAmount.toFixed(2)}`}
+                                            </strong>
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
+                            </details>
 
-                            <div className="form-group" style={{ marginTop: '0.75rem' }}>
-                                <label className="form-label">Paid Amount (₹)</label>
-                                <input type="number" min={0} value={paidAmt} onChange={event => setPaidAmt(event.target.value)} placeholder={totals.grand.toFixed(2)} />
-                            </div>
-                            {paidAmt !== '' && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginTop: '0.5rem', padding: '0.5rem 0.75rem', background: 'var(--bg-elevated)', borderRadius: 8 }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Outstanding</span>
-                                    <span style={{ fontWeight: 700, color: Math.max(0, totals.grand - +paidAmt) > 0 ? 'var(--danger)' : 'var(--success)' }}>
-                                        ₹{Math.max(0, totals.grand - +paidAmt).toFixed(2)}
-                                    </span>
+                            <details className="compact-details">
+                                <summary>Tax Details</summary>
+                                <div className="compact-details__content">
+                                    <div className="summary-row"><span>Taxable Value</span><span>{`₹${totals.taxable.toFixed(2)}`}</span></div>
+                                    <div className="summary-row"><span>CGST</span><span>{`₹${totals.cgst.toFixed(2)}`}</span></div>
+                                    <div className="summary-row"><span>SGST</span><span>{`₹${totals.sgst.toFixed(2)}`}</span></div>
                                 </div>
-                            )}
+                            </details>
 
-                            <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem', justifyContent: 'center' }} onClick={saveBill} disabled={saving}>
-                                <Save size={15} /> {saving ? 'Saving…' : editingBillId ? 'Update Bill' : 'Save Bill'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+↵</kbd>
-                            </button>
+                            <div className="summary-actions">
+                                <button className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={saveBill} disabled={saving}>
+                                    <Save size={15} /> {saving ? 'Saving...' : editingBillId ? 'Update Bill' : 'Save Bill'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+Enter</kbd>
+                                </button>
+                            </div>
                         </div>
 
-                        <div className="surface" style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        <div className="surface shortcut-panel">
                             <p style={{ marginBottom: '0.3rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Keyboard shortcuts</p>
                             <p><kbd className="kbd">Tab</kbd> - move between fields / select item</p>
                             <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+N</kbd> - add item row</p>
                             <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Enter</kbd> on last qty - new row</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+↵</kbd> - save bill</p>
+                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+Enter</kbd> - save bill</p>
                         </div>
                     </div>
                 </div>
             )}
-
             {selectedBill && (
                 <Modal
                     title={`Bill Details: ${selectedBill.bill_number}`}
