@@ -1,28 +1,34 @@
-import { useRef, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, X } from 'lucide-react';
-import { useKeyboardShortcut } from '../hooks/useKeyboard';
 
 const titles = {
     '/': 'Dashboard',
     '/products': 'Products',
     '/sales': 'Sales & Billing',
+    '/sales/history': 'Sales & Billing',
     '/purchases': 'Purchases',
+    '/purchases/history': 'Purchases',
     '/contacts': 'Contacts',
+    '/daily-ledger': 'Accounting',
+    '/customer-ledger': 'Accounting',
+    '/supplier-ledger': 'Accounting',
+    '/payments': 'Accounting',
+    '/stock-returns': 'Returns & Adjustments',
+    '/stock-adjustments': 'Returns & Adjustments',
+    '/returns-history': 'Returns & Adjustments',
+    '/credit-notes': 'Returns & Adjustments',
+    '/sales-returns': 'Sales Returns',
+    '/settings': 'Settings',
 };
 
-export default function Navbar({ onSearch }) {
+export default function Navbar() {
     const location = useLocation();
-    const searchRef = useRef(null);
-    const [query, setQuery] = useState('');
     const [time, setTime] = useState(new Date());
 
     useEffect(() => {
         const timer = setInterval(() => setTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
-
-    useKeyboardShortcut('s', () => searchRef.current?.focus());
 
     const title = titles[location.pathname] || 'StockPro';
 
@@ -32,45 +38,14 @@ export default function Navbar({ onSearch }) {
             padding: '0 1.25rem',
             background: 'color-mix(in oklch, var(--surface-1) 88%, black 12%)',
             borderBottom: '1px solid var(--line-soft)',
-            boxShadow: '0 10px 32px rgb(0 0 0 / 0.12)',
             flexShrink: 0,
         }}>
-            {/* Page title */}
             <h1 style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-strong)', whiteSpace: 'nowrap', letterSpacing: '-0.02em' }}>
                 {title}
             </h1>
 
-            {/* Search */}
-            <div style={{
-                flex: 1, maxWidth: 380, position: 'relative',
-                marginLeft: '0.5rem',
-            }}>
-                <Search size={15} style={{
-                    position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)', pointerEvents: 'none',
-                }} />
-                <input
-                    ref={searchRef}
-                    value={query}
-                    onChange={e => { setQuery(e.target.value); onSearch?.(e.target.value); }}
-                    placeholder="Search… (Alt+S)"
-                    style={{ paddingLeft: '2rem', paddingRight: query ? '2rem' : '0.75rem', fontSize: '0.85rem' }}
-                />
-                {query && (
-                    <button
-                        className="btn-icon"
-                        onClick={() => { setQuery(''); onSearch?.(''); searchRef.current?.focus(); }}
-                        style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)' }}
-                    >
-                        <X size={13} />
-                    </button>
-                )}
-            </div>
-
-            {/* Spacer */}
             <div style={{ flex: 1 }} />
 
-            {/* Clock */}
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                 {time.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                 &nbsp;&nbsp;

@@ -5,6 +5,10 @@ __pycache__/
 .env
 db.sqlite3
 
+# Runtime logs
+*.log
+backend/*.log
+
 # Node
 node_modules/
 dist/

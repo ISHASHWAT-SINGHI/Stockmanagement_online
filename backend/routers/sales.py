@@ -11,6 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from accounting import (
+    clamp_money,
+    compute_bill_payment_state,
+    compute_followup_payment_state,
+    create_sale_payment_transaction,
+    delete_initial_sale_payments,
+    normalize_payment_mode,
+    sync_customer_ledger,
+)
 import models
 import schemas
 from database import get_db
@@ -190,29 +199,38 @@ async def apply_sale_items(
         )
 
 
-async def update_customer_ledger(
-    db: AsyncSession,
-    customer_id: int | None,
-    *,
-    credit_delta: float = 0,
-    paid_delta: float = 0,
-    outstanding_delta: float = 0,
-) -> None:
-    if not customer_id:
-        return
-
-    ledger_result = await db.execute(
-        select(models.CustomerLedger).where(models.CustomerLedger.customer_id == customer_id)
+def build_sale_payment_fields(bill: schemas.SalesBillCreate) -> dict:
+    payment_state = compute_bill_payment_state(bill.grand_total, bill.paid_amount)
+    payment_mode = normalize_payment_mode(bill.payment_mode)
+    bill_dict = bill.model_dump(
+        exclude={
+            "items",
+            "bill_number",
+            "payment_note",
+            "payment_reference",
+            "paid_amount",
+            "outstanding_amount",
+            "payment_status",
+            "payment_mode",
+        },
+        exclude_none=True,
     )
-    ledger = ledger_result.scalar_one_or_none()
-    if not ledger:
-        ledger = models.CustomerLedger(customer_id=customer_id)
-        db.add(ledger)
-        await db.flush()
 
-    ledger.total_credit = (ledger.total_credit or 0) + credit_delta
-    ledger.total_paid = (ledger.total_paid or 0) + paid_delta
-    ledger.outstanding_balance = max(0, (ledger.outstanding_balance or 0) + outstanding_delta)
+    if payment_mode is None:
+        if payment_state.applied_paid_amount > 0:
+            payment_mode = "Cash"
+        elif payment_state.outstanding_amount > 0:
+            payment_mode = "Credit"
+
+    bill_dict.update(
+        {
+            "paid_amount": payment_state.applied_paid_amount,
+            "outstanding_amount": payment_state.outstanding_amount,
+            "payment_status": payment_state.payment_status,
+            "payment_mode": payment_mode,
+        }
+    )
+    return bill_dict
 
 
 async def restore_sale_item_stock(
@@ -385,7 +403,10 @@ async def load_bill_for_edit(db: AsyncSession, bill_id: int) -> models.SalesBill
 async def get_sales(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(models.SalesBill)
-        .options(selectinload(models.SalesBill.sales_items))
+        .options(
+            selectinload(models.SalesBill.sales_items),
+            selectinload(models.SalesBill.customer),
+        )
         .where(models.SalesBill.is_deleted == False)
         .order_by(models.SalesBill.bill_date.desc(), models.SalesBill.id.desc())
         .offset(skip)
@@ -403,7 +424,17 @@ async def create_sale(
     bill_day = bill.bill_date or datetime.utcnow().date()
     financial_year, bill_sequence, bill_number = await next_bill_identity(db, bill_day)
     bill_datetime = get_bill_datetime(bill_day)
-    bill_dict = bill.model_dump(exclude={"items", "bill_number"}, exclude_none=True)
+    if bill.customer_id:
+        customer_result = await db.execute(
+            select(models.Customer).where(
+                models.Customer.id == bill.customer_id,
+                models.Customer.is_deleted == False,
+            )
+        )
+        if not customer_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Customer not found")
+
+    bill_dict = build_sale_payment_fields(bill)
     bill_dict.update(
         {
             "bill_number": bill_number,
@@ -420,13 +451,17 @@ async def create_sale(
         await db.flush()
 
         await apply_sale_items(db, db_bill, items_data)
-        await update_customer_ledger(
+        await create_sale_payment_transaction(
             db,
-            db_bill.customer_id,
-            credit_delta=db_bill.grand_total,
-            paid_delta=db_bill.paid_amount,
-            outstanding_delta=db_bill.outstanding_amount,
+            db_bill,
+            amount=db_bill.paid_amount,
+            payment_mode=db_bill.payment_mode,
+            payment_date=db_bill.bill_date,
+            notes=bill.payment_note,
+            reference_number=bill.payment_reference,
+            is_initial_payment=True,
         )
+        await sync_customer_ledger(db, db_bill.customer_id)
 
         settings = await get_business_settings(db)
         detailed_bill = await load_bill_for_edit(db, db_bill.id)
@@ -452,8 +487,18 @@ async def update_sale(
     db_bill = await load_bill_for_edit(db, bill_id)
     if not db_bill:
         raise HTTPException(status_code=404, detail="Bill not found")
-    if db_bill.payment_transactions:
+    if any(not payment.is_initial_payment for payment in (db_bill.payment_transactions or [])):
         raise HTTPException(status_code=400, detail="Bills with recorded follow-up payments cannot be edited.")
+
+    if bill.customer_id:
+        customer_result = await db.execute(
+            select(models.Customer).where(
+                models.Customer.id == bill.customer_id,
+                models.Customer.is_deleted == False,
+            )
+        )
+        if not customer_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Customer not found")
 
     bill_day = bill.bill_date or db_bill.bill_date.date()
     if get_financial_year(bill_day) != (db_bill.financial_year or get_financial_year(db_bill.bill_date.date())):
@@ -465,14 +510,6 @@ async def update_sale(
     snapshot_path: Path | None = None
     old_customer_id = db_bill.customer_id
     try:
-        await update_customer_ledger(
-            db,
-            old_customer_id,
-            credit_delta=-db_bill.grand_total,
-            paid_delta=-db_bill.paid_amount,
-            outstanding_delta=-db_bill.outstanding_amount,
-        )
-
         for sale_item in db_bill.sales_items:
             await restore_sale_item_stock(db, db_bill, sale_item)
 
@@ -480,9 +517,10 @@ async def update_sale(
             for allocation in list(sale_item.batch_allocations):
                 await db.delete(allocation)
             await db.delete(sale_item)
+        await delete_initial_sale_payments(db, db_bill)
         await db.flush()
 
-        bill_dict = bill.model_dump(exclude={"items", "bill_number"}, exclude_none=True)
+        bill_dict = build_sale_payment_fields(bill)
         bill_dict["bill_date"] = get_bill_datetime(bill_day)
         for key, value in bill_dict.items():
             setattr(db_bill, key, value)
@@ -492,13 +530,19 @@ async def update_sale(
         db_bill.revision_number = (db_bill.revision_number or 1) + 1
 
         await apply_sale_items(db, db_bill, bill.items)
-        await update_customer_ledger(
+        await create_sale_payment_transaction(
             db,
-            db_bill.customer_id,
-            credit_delta=db_bill.grand_total,
-            paid_delta=db_bill.paid_amount,
-            outstanding_delta=db_bill.outstanding_amount,
+            db_bill,
+            amount=db_bill.paid_amount,
+            payment_mode=db_bill.payment_mode,
+            payment_date=db_bill.bill_date,
+            notes=bill.payment_note,
+            reference_number=bill.payment_reference,
+            is_initial_payment=True,
         )
+        await sync_customer_ledger(db, old_customer_id)
+        if db_bill.customer_id != old_customer_id:
+            await sync_customer_ledger(db, db_bill.customer_id)
 
         settings = await get_business_settings(db)
         detailed_bill = await load_bill_for_edit(db, db_bill.id)
@@ -522,32 +566,82 @@ async def get_sale(bill_id: int, db: AsyncSession = Depends(get_db)):
     return bill
 
 
+@router.get("/sales/{bill_id}/payments", response_model=List[schemas.PaymentTransactionResponse])
+async def get_sale_payments(bill_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(models.PaymentTransaction)
+        .where(models.PaymentTransaction.bill_id == bill_id)
+        .order_by(models.PaymentTransaction.payment_date.asc(), models.PaymentTransaction.id.asc())
+    )
+    return result.scalars().all()
+
+
+@router.post("/sales/{bill_id}/payments", response_model=schemas.PaymentTransactionResponse)
+async def create_sale_payment(
+    bill_id: int,
+    payment: schemas.PaymentTransactionCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    if payment.bill_id != bill_id:
+        raise HTTPException(status_code=400, detail="Bill ID in path and payload must match.")
+    return await create_payment(payment, db)
+
+
 @router.get("/payments", response_model=List[schemas.PaymentTransactionResponse])
 async def get_payments(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(models.PaymentTransaction))
+    result = await db.execute(
+        select(models.PaymentTransaction)
+        .order_by(models.PaymentTransaction.payment_date.desc(), models.PaymentTransaction.id.desc())
+    )
     return result.scalars().all()
 
 
 @router.post("/payments", response_model=schemas.PaymentTransactionResponse)
 async def create_payment(payment: schemas.PaymentTransactionCreate, db: AsyncSession = Depends(get_db)):
-    db_payment = models.PaymentTransaction(**payment.model_dump())
-    db.add(db_payment)
-
-    bill_result = await db.execute(select(models.SalesBill).where(models.SalesBill.id == payment.bill_id))
-    bill = bill_result.scalar_one_or_none()
-    if bill:
-        bill.paid_amount += payment.amount
-        bill.outstanding_amount = max(0, bill.grand_total - bill.paid_amount)
-        bill.payment_status = "Paid" if bill.outstanding_amount == 0 else "Partial"
-
-    ledger_result = await db.execute(
-        select(models.CustomerLedger).where(models.CustomerLedger.customer_id == payment.customer_id)
+    bill_result = await db.execute(
+        select(models.SalesBill)
+        .where(models.SalesBill.id == payment.bill_id, models.SalesBill.is_deleted == False)
     )
-    ledger = ledger_result.scalar_one_or_none()
-    if ledger:
-        ledger.total_paid += payment.amount
-        ledger.outstanding_balance = max(0, ledger.outstanding_balance - payment.amount)
+    bill = bill_result.scalar_one_or_none()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
 
-    await db.commit()
+    customer_id = bill.customer_id
+    if payment.customer_id is not None and customer_id is not None and payment.customer_id != customer_id:
+        raise HTTPException(status_code=400, detail="Payment customer does not match the bill customer.")
+    if payment.customer_id is not None and customer_id is None:
+        customer_id = payment.customer_id
+
+    payment_mode = normalize_payment_mode(payment.payment_mode) or "Cash"
+    payment_state = compute_followup_payment_state(bill.grand_total, bill.paid_amount, payment.amount)
+
+    try:
+        db_payment = models.PaymentTransaction(
+            bill_id=bill.id,
+            customer_id=customer_id,
+            amount=clamp_money(payment.amount),
+            payment_mode=payment_mode,
+            payment_date=payment.payment_date or datetime.utcnow(),
+            notes=payment.notes,
+            reference_number=payment.reference_number,
+            is_initial_payment=False,
+        )
+        db.add(db_payment)
+
+        bill.paid_amount = payment_state.applied_paid_amount
+        bill.outstanding_amount = payment_state.outstanding_amount
+        bill.payment_status = payment_state.payment_status
+        if not bill.payment_mode:
+            bill.payment_mode = payment_mode
+
+        await sync_customer_ledger(db, customer_id)
+        await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+
     await db.refresh(db_payment)
     return db_payment

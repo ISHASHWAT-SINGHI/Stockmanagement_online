@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from accounting import sync_supplier_ledger
 import models
 import schemas
 from database import get_db
@@ -195,6 +196,7 @@ async def create_purchase_invoice(
                 )
             )
 
+        await sync_supplier_ledger(db, invoice.supplier_id)
         await db.commit()
     except IntegrityError:
         await db.rollback()

@@ -88,6 +88,7 @@ class ProductCreate(ProductBase):
 
 class ProductResponse(ProductBase):
     id: int
+    non_sellable_stock: int = 0
     is_archived: bool
     class Config:
         from_attributes = True
@@ -184,6 +185,7 @@ class StockBatchCreate(BaseModel):
 
 class StockBatchResponse(StockBatchCreate):
     id: int
+    non_sellable_quantity: int = 0
     class Config:
         from_attributes = True
 
@@ -230,11 +232,14 @@ class SalesBillCreate(BaseModel):
     outstanding_amount: float = 0
     payment_status: str = "Pending"
     payment_mode: Optional[str] = None
+    payment_note: Optional[str] = None
+    payment_reference: Optional[str] = None
     items: List[SaleItemCreate]
 
 class SalesBillResponse(BaseModel):
     id: int
     customer_id: Optional[int] = None
+    customer: Optional[CustomerResponse] = None
     bill_number: str
     bill_date: datetime
     subtotal: float
@@ -259,6 +264,7 @@ class SalesBillResponse(BaseModel):
 class SalesBillDetailResponse(SalesBillResponse):
     sales_items: List[SaleItemResponse] = []
     customer: Optional[CustomerResponse] = None
+    payment_transactions: List["PaymentTransactionResponse"] = []
     class Config:
         from_attributes = True
 
@@ -267,13 +273,16 @@ class SalesBillDetailResponse(SalesBillResponse):
 
 class PaymentTransactionCreate(BaseModel):
     bill_id: int
-    customer_id: int
+    customer_id: Optional[int] = None
     amount: float
     payment_mode: str
+    payment_date: Optional[datetime] = None
     notes: Optional[str] = None
+    reference_number: Optional[str] = None
 
 class PaymentTransactionResponse(PaymentTransactionCreate):
     id: int
+    is_initial_payment: bool = False
     payment_date: datetime
     class Config:
         from_attributes = True
@@ -284,10 +293,34 @@ class PaymentTransactionResponse(PaymentTransactionCreate):
 class CustomerLedgerResponse(BaseModel):
     customer_id: int
     total_credit: float
+    total_billed: float = 0
     total_paid: float
+    total_credit_notes: float = 0
     outstanding_balance: float
+    bills: List["CustomerLedgerBillHistory"] = []
+    payments: List[PaymentTransactionResponse] = []
+    credit_notes: List["CreditNoteResponse"] = []
+    sales_returns: List["SalesReturnResponse"] = []
     class Config:
         from_attributes = True
+
+
+class CustomerLedgerOverviewRow(BaseModel):
+    customer_id: int
+    customer_name: str
+    phone: Optional[str] = None
+    gst_number: Optional[str] = None
+    total_credit: float = 0
+    total_billed: float = 0
+    total_paid: float = 0
+    total_credit_notes: float = 0
+    outstanding_balance: float = 0
+
+
+class CustomerLedgerOverviewResponse(BaseModel):
+    items: List["CustomerLedgerOverviewRow"] = []
+    total_outstanding_receivable: float = 0
+    total_customers: int = 0
 
 
 # ─── Stock Ledger ────────────────────────────────────────────────────────────
@@ -311,6 +344,7 @@ class StockAdjustmentCreate(BaseModel):
     adjustment_type: str  # DAMAGE, EXPIRY, CORRECTION, RETURN
     quantity: int         # negative = reduction, positive = addition
     reason: Optional[str] = None
+    final_action: Optional[str] = "Adjusted"
 
 class StockAdjustmentResponse(BaseModel):
     id: int
@@ -320,8 +354,218 @@ class StockAdjustmentResponse(BaseModel):
     quantity: int
     reason: Optional[str] = None
     adjusted_by: str
+    final_action: Optional[str] = None
     previous_stock: int
     new_stock: int
     created_at: datetime
     class Config:
         from_attributes = True
+
+
+class CustomerLedgerBillHistory(BaseModel):
+    id: int
+    bill_number: str
+    bill_date: datetime
+    grand_total: float
+    paid_amount: float
+    outstanding_amount: float
+    payment_status: str
+    payment_mode: Optional[str] = None
+    class Config:
+        from_attributes = True
+
+
+class SupplierLedgerInvoiceHistory(BaseModel):
+    id: int
+    invoice_number: str
+    invoice_date: date
+    total_amount: float
+    class Config:
+        from_attributes = True
+
+
+class SupplierPaymentTransactionCreate(BaseModel):
+    supplier_id: int
+    amount: float
+    payment_mode: str
+    payment_date: Optional[datetime] = None
+    notes: Optional[str] = None
+    reference_number: Optional[str] = None
+
+
+class SupplierPaymentTransactionResponse(SupplierPaymentTransactionCreate):
+    id: int
+    payment_date: datetime
+    class Config:
+        from_attributes = True
+
+
+class SupplierLedgerResponse(BaseModel):
+    supplier_id: int
+    total_purchases: float
+    total_paid: float
+    total_returns: float
+    outstanding_balance: float
+    invoices: List[SupplierLedgerInvoiceHistory] = []
+    payments: List[SupplierPaymentTransactionResponse] = []
+    stock_returns: List["SupplierStockReturnResponse"] = []
+    class Config:
+        from_attributes = True
+
+
+class SupplierLedgerOverviewRow(BaseModel):
+    supplier_id: int
+    company_name: str
+    phone: Optional[str] = None
+    gst_number: Optional[str] = None
+    total_purchases: float = 0
+    total_paid: float = 0
+    total_returns: float = 0
+    outstanding_balance: float = 0
+
+
+class SupplierLedgerOverviewResponse(BaseModel):
+    items: List["SupplierLedgerOverviewRow"] = []
+    total_outstanding_payable: float = 0
+    total_suppliers: int = 0
+
+
+class AccountingSummaryResponse(BaseModel):
+    total_customer_receivable: float = 0
+    total_supplier_payable: float = 0
+    net_position: float = 0
+
+
+class CreditNoteCreate(BaseModel):
+    bill_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    sales_return_id: Optional[int] = None
+    amount: float
+    reason: str
+    credit_date: Optional[date] = None
+
+
+class CreditNoteResponse(BaseModel):
+    id: int
+    note_number: Optional[str] = None
+    bill_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    sales_return_id: Optional[int] = None
+    amount: float
+    applied_amount: float = 0
+    reason: str
+    credit_date: datetime
+    status: str
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+
+class SalesReturnItemCreate(BaseModel):
+    sale_item_id: int
+    product_id: int
+    quantity: int
+    amount: float
+    stock_action: str = "SELLABLE"
+    reason: str
+
+
+class SalesReturnItemResponse(SalesReturnItemCreate):
+    id: int
+    product_name_snapshot: Optional[str] = None
+    class Config:
+        from_attributes = True
+
+
+class SalesReturnCreate(BaseModel):
+    bill_id: int
+    customer_id: Optional[int] = None
+    return_date: Optional[date] = None
+    reason: str
+    settlement_type: str = "Credit Note"
+    notes: Optional[str] = None
+    items: List[SalesReturnItemCreate]
+
+
+class SalesReturnResponse(BaseModel):
+    id: int
+    return_number: Optional[str] = None
+    bill_id: int
+    customer_id: Optional[int] = None
+    return_date: datetime
+    reason: str
+    settlement_type: str
+    total_amount: float = 0
+    applied_outstanding_amount: float = 0
+    refund_amount: float
+    credit_note_amount: float
+    status: str
+    notes: Optional[str] = None
+    items: List[SalesReturnItemResponse] = []
+    class Config:
+        from_attributes = True
+
+
+class SupplierStockReturnItemCreate(BaseModel):
+    product_id: int
+    stock_batch_id: Optional[int] = None
+    quantity: int
+    amount: float = 0
+    stock_source: str = "SELLABLE"
+    reason: str
+
+
+class SupplierStockReturnItemResponse(SupplierStockReturnItemCreate):
+    id: int
+    product_name_snapshot: Optional[str] = None
+    batch_number_snapshot: Optional[str] = None
+    class Config:
+        from_attributes = True
+
+
+class SupplierStockReturnCreate(BaseModel):
+    supplier_id: int
+    return_date: Optional[date] = None
+    reason: str
+    status: str = "Pending"
+    credit_amount: float = 0
+    notes: Optional[str] = None
+    items: List[SupplierStockReturnItemCreate]
+
+
+class SupplierStockReturnUpdate(BaseModel):
+    status: str
+    credit_amount: float = 0
+    notes: Optional[str] = None
+
+
+class SupplierStockReturnResponse(BaseModel):
+    id: int
+    return_number: Optional[str] = None
+    supplier_id: int
+    return_date: datetime
+    reason: str
+    status: str
+    credit_amount: float
+    notes: Optional[str] = None
+    items: List[SupplierStockReturnItemResponse] = []
+    class Config:
+        from_attributes = True
+
+
+class DailyLedgerResponse(BaseModel):
+    ledger_date: date
+    cash_sales: float
+    upi_sales: float
+    card_sales: float
+    credit_sales: float
+    purchase_payments: float
+    sales_returns: float
+    stock_return_credit: float
+    total_collection: float
+    total_outstanding: float
+
+
+SalesBillDetailResponse.model_rebuild()
+CustomerLedgerResponse.model_rebuild()
+SupplierLedgerResponse.model_rebuild()

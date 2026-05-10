@@ -74,6 +74,9 @@ class Supplier(TimestampMixin, SoftDeleteMixin, Base):
     email = Column(String)
 
     purchase_invoices = relationship("PurchaseInvoice", back_populates="supplier")
+    ledger = relationship("SupplierLedger", uselist=False)
+    stock_returns = relationship("SupplierStockReturn", back_populates="supplier")
+    payment_transactions = relationship("SupplierPaymentTransaction", back_populates="supplier")
 
 
 # ─── Products ─────────────────────────────────────────────────────────────────
@@ -85,6 +88,7 @@ class Product(TimestampMixin, SoftDeleteMixin, Base):
     packing_type = Column(String, default="Unit")
     units_per_pack = Column(Integer, default=1)
     current_stock = Column(Integer, default=0)
+    non_sellable_stock = Column(Integer, default=0)
     is_archived = Column(Boolean, default=False, nullable=False, index=True)
 
     # Future-proof optional fields (additive — no breaking migrations later)
@@ -121,6 +125,8 @@ class Customer(TimestampMixin, SoftDeleteMixin, Base):
     sales_bills = relationship("SalesBill", back_populates="customer")
     payment_transactions = relationship("PaymentTransaction", back_populates="customer")
     ledger = relationship("CustomerLedger", back_populates="customer", uselist=False)
+    sales_returns = relationship("SalesReturn")
+    credit_notes = relationship("CreditNote")
 
 
 # ─── Purchase Invoices ────────────────────────────────────────────────────────
@@ -169,6 +175,7 @@ class StockBatch(Base):
     gst_percentage = Column(Float)
     initial_quantity = Column(Integer)
     available_quantity = Column(Integer)
+    non_sellable_quantity = Column(Integer, default=0)
     purchase_date = Column(Date)
     expiry_date = Column(Date)
 
@@ -205,6 +212,8 @@ class SalesBill(TimestampMixin, SoftDeleteMixin, Base):
     customer = relationship("Customer", back_populates="sales_bills")
     sales_items = relationship("SaleItem", back_populates="bill")
     payment_transactions = relationship("PaymentTransaction", back_populates="bill")
+    sales_returns = relationship("SalesReturn", back_populates="bill")
+    credit_notes = relationship("CreditNote", back_populates="bill")
 
     __table_args__ = (
         UniqueConstraint("financial_year", "bill_sequence", name="uq_sales_bills_financial_year_sequence"),
@@ -276,6 +285,7 @@ class StockAdjustment(TimestampMixin, Base):
     quantity = Column(Integer, nullable=False)         # negative = reduction
     reason = Column(Text)
     adjusted_by = Column(String)                      # username
+    final_action = Column(String, default="Adjusted")
     previous_stock = Column(Integer)
     new_stock = Column(Integer)
 
@@ -293,6 +303,8 @@ class PaymentTransaction(Base):
     payment_mode = Column(String, nullable=False)
     payment_date = Column(DateTime, default=datetime.datetime.utcnow)
     notes = Column(Text)
+    reference_number = Column(String)
+    is_initial_payment = Column(Boolean, default=False, nullable=False)
 
     bill = relationship("SalesBill", back_populates="payment_transactions")
     customer = relationship("Customer", back_populates="payment_transactions")
@@ -304,7 +316,135 @@ class CustomerLedger(Base):
     __tablename__ = "customer_ledger"
     customer_id = Column(Integer, ForeignKey("customers.id"), primary_key=True)
     total_credit = Column(Float, default=0)
+    total_billed = Column(Float, default=0)
     total_paid = Column(Float, default=0)
+    total_credit_notes = Column(Float, default=0)
     outstanding_balance = Column(Float, default=0)
 
     customer = relationship("Customer", back_populates="ledger")
+
+
+class SupplierLedger(Base):
+    __tablename__ = "supplier_ledger"
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), primary_key=True)
+    total_purchases = Column(Float, default=0)
+    total_paid = Column(Float, default=0)
+    total_returns = Column(Float, default=0)
+    outstanding_balance = Column(Float, default=0)
+
+    supplier = relationship("Supplier", back_populates="ledger")
+
+
+class CreditNote(TimestampMixin, Base):
+    __tablename__ = "credit_notes"
+    id = Column(Integer, primary_key=True, index=True)
+    note_number = Column(String, unique=True, index=True)
+    bill_id = Column(Integer, ForeignKey("sales_bills.id"))
+    customer_id = Column(Integer, ForeignKey("customers.id"))
+    sales_return_id = Column(Integer, ForeignKey("sales_returns.id"))
+    amount = Column(Float, nullable=False)
+    applied_amount = Column(Float, default=0)
+    reason = Column(Text, nullable=False)
+    credit_date = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    status = Column(String, default="Open", nullable=False)
+
+    bill = relationship("SalesBill", back_populates="credit_notes")
+    customer = relationship("Customer", back_populates="credit_notes")
+    sales_return = relationship("SalesReturn", back_populates="credit_note")
+
+
+class SalesReturn(TimestampMixin, Base):
+    __tablename__ = "sales_returns"
+    id = Column(Integer, primary_key=True, index=True)
+    return_number = Column(String, unique=True, index=True)
+    bill_id = Column(Integer, ForeignKey("sales_bills.id"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"))
+    return_date = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    reason = Column(Text, nullable=False)
+    settlement_type = Column(String, nullable=False, default="Credit Note")
+    total_amount = Column(Float, default=0)
+    applied_outstanding_amount = Column(Float, default=0)
+    refund_amount = Column(Float, default=0)
+    credit_note_amount = Column(Float, default=0)
+    status = Column(String, default="Completed", nullable=False)
+    notes = Column(Text)
+
+    bill = relationship("SalesBill", back_populates="sales_returns")
+    customer = relationship("Customer", back_populates="sales_returns")
+    items = relationship("SalesReturnItem", back_populates="sales_return")
+    credit_note = relationship("CreditNote", back_populates="sales_return", uselist=False)
+
+
+class SalesReturnItem(Base):
+    __tablename__ = "sales_return_items"
+    id = Column(Integer, primary_key=True, index=True)
+    sales_return_id = Column(Integer, ForeignKey("sales_returns.id"), nullable=False)
+    sale_item_id = Column(Integer, ForeignKey("sales_items.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    amount = Column(Float, default=0)
+    stock_action = Column(String, default="SELLABLE", nullable=False)
+    reason = Column(Text, nullable=False)
+    product_name_snapshot = Column(String)
+
+    sales_return = relationship("SalesReturn", back_populates="items")
+    sale_item = relationship("SaleItem")
+    product = relationship("Product")
+    batch_allocations = relationship("SalesReturnBatchAllocation", back_populates="sales_return_item")
+
+
+class SalesReturnBatchAllocation(Base):
+    __tablename__ = "sales_return_batch_allocations"
+    id = Column(Integer, primary_key=True, index=True)
+    sales_return_item_id = Column(Integer, ForeignKey("sales_return_items.id"), nullable=False, index=True)
+    stock_batch_id = Column(Integer, ForeignKey("stock_batches.id"), nullable=False, index=True)
+    quantity = Column(Integer, nullable=False)
+
+    sales_return_item = relationship("SalesReturnItem", back_populates="batch_allocations")
+    stock_batch = relationship("StockBatch")
+
+
+class SupplierStockReturn(TimestampMixin, Base):
+    __tablename__ = "supplier_stock_returns"
+    id = Column(Integer, primary_key=True, index=True)
+    return_number = Column(String, unique=True, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
+    return_date = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    reason = Column(Text, nullable=False)
+    status = Column(String, default="Pending", nullable=False)
+    credit_amount = Column(Float, default=0)
+    notes = Column(Text)
+
+    supplier = relationship("Supplier", back_populates="stock_returns")
+    items = relationship("SupplierStockReturnItem", back_populates="supplier_stock_return")
+
+
+class SupplierStockReturnItem(Base):
+    __tablename__ = "supplier_stock_return_items"
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_stock_return_id = Column(Integer, ForeignKey("supplier_stock_returns.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    stock_batch_id = Column(Integer, ForeignKey("stock_batches.id"))
+    quantity = Column(Integer, nullable=False)
+    amount = Column(Float, default=0)
+    stock_source = Column(String, default="SELLABLE", nullable=False)
+    reason = Column(Text, nullable=False)
+    product_name_snapshot = Column(String)
+    batch_number_snapshot = Column(String)
+
+    supplier_stock_return = relationship("SupplierStockReturn", back_populates="items")
+    product = relationship("Product")
+    stock_batch = relationship("StockBatch")
+
+
+class SupplierPaymentTransaction(Base):
+    __tablename__ = "supplier_payment_transactions"
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    payment_mode = Column(String, nullable=False)
+    payment_date = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    notes = Column(Text)
+    reference_number = Column(String)
+
+    supplier = relationship("Supplier", back_populates="payment_transactions")

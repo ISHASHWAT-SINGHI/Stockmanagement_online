@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { CheckCircle, Eye, Pencil, Plus, Printer, Save, ShoppingCart, Trash2 } from 'lucide-react';
-import { createSale, getBusinessSettings, getCustomers, getProducts, getSale, getSales, updateSale } from '../api';
+import { createSale, createSalePayment, getBusinessSettings, getCustomers, getProducts, getSale, getSales, updateSale } from '../api';
 import { useKeyboardShortcut } from '../hooks/useKeyboard';
 import { useToast } from '../hooks/useToast';
 import Modal from '../components/Modal';
+import ModuleTabs from '../components/ModuleTabs';
 
 const GST_RATES = [0, 5, 12, 18, 28];
 
@@ -113,6 +115,7 @@ function getApiErrorMessage(error, fallback) {
 
 export default function Sales() {
     const { addToast } = useToast();
+    const location = useLocation();
     const [products, setProducts] = useState([]);
     const [customers, setCustomers] = useState([]);
     const [bills, setBills] = useState([]);
@@ -127,6 +130,8 @@ export default function Sales() {
     const [isDiscountPercent, setIsDiscountPercent] = useState(false);
     const [paymentMode, setPaymentMode] = useState('Cash');
     const [paidAmt, setPaidAmt] = useState('');
+    const [paymentNote, setPaymentNote] = useState('');
+    const [paymentReference, setPaymentReference] = useState('');
     const [saving, setSaving] = useState(false);
 
     const [productSuggestions, setProductSuggestions] = useState({ index: null, list: [], activeIdx: -1 });
@@ -135,6 +140,13 @@ export default function Sales() {
 
     const [selectedBill, setSelectedBill] = useState(null);
     const [settings, setSettings] = useState(null);
+    const [followupPayment, setFollowupPayment] = useState({ amount: '', payment_mode: 'Cash', notes: '', reference_number: '' });
+
+    const salesTabs = [
+        { label: 'New Bill', path: '/sales', end: true },
+        { label: 'Bill History', path: '/sales/history' },
+        { label: 'Sales Returns', path: '/sales-returns' },
+    ];
 
     const itemRefs = useRef([]);
     const productInputRefs = useRef([]);
@@ -176,6 +188,10 @@ export default function Sales() {
         load();
     }, [load]);
 
+    useEffect(() => {
+        setView(location.pathname === '/sales/history' ? 'history' : 'new');
+    }, [location.pathname]);
+
     const resetBillForm = useCallback(() => {
         setEditingBillId(null);
         setCustomerId('');
@@ -186,6 +202,8 @@ export default function Sales() {
         setIsDiscountPercent(false);
         setPaymentMode('Cash');
         setPaidAmt('');
+        setPaymentNote('');
+        setPaymentReference('');
         setProductSuggestions({ index: null, list: [], activeIdx: -1 });
         setCustomerSuggestions([]);
         setCustomerSuggestIndex(-1);
@@ -347,6 +365,7 @@ export default function Sales() {
         try {
             const response = await getSale(id);
             setSelectedBill(response.data);
+            setFollowupPayment({ amount: '', payment_mode: 'Cash', notes: '', reference_number: '' });
         } catch (error) {
             addToast(getApiErrorMessage(error, 'Failed to load bill details'), 'error');
         }
@@ -390,6 +409,8 @@ export default function Sales() {
         setIsDiscountPercent(false);
         setPaymentMode(billData.payment_mode || 'Cash');
         setPaidAmt(billData.paid_amount != null ? String(billData.paid_amount) : '');
+        setPaymentNote('');
+        setPaymentReference('');
         setSelectedBill(null);
         setView('new');
         setProductSuggestions({ index: null, list: [], activeIdx: -1 });
@@ -409,7 +430,9 @@ export default function Sales() {
     const totalQuantity = getTotalQuantity(items.filter(item => item.product_id));
     const totalTax = +(totals.cgst + totals.sgst).toFixed(2);
     const paidAmountValue = paidAmt === '' ? totals.grand : Number(paidAmt) || 0;
-    const outstandingAmount = Math.max(0, totals.grand - paidAmountValue);
+    const appliedPaidAmount = Math.min(paidAmountValue, totals.grand);
+    const outstandingAmount = Math.max(0, totals.grand - appliedPaidAmount);
+    const changeAmount = Math.max(0, paidAmountValue - totals.grand);
 
     const saveBill = async () => {
         const preparedItems = resolveItemsForSave();
@@ -441,6 +464,8 @@ export default function Sales() {
             outstanding_amount: outstanding,
             payment_status: outstanding === 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending',
             payment_mode: paymentMode,
+            payment_note: paymentNote || null,
+            payment_reference: paymentReference || null,
             items: validItems.map(item => ({
                 product_id: item.product_id,
                 quantity: item.quantity,
@@ -468,6 +493,32 @@ export default function Sales() {
             addToast(getApiErrorMessage(error, 'Failed to save bill'), 'error');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const saveAdditionalPayment = async () => {
+        if (!selectedBill) return;
+        if (!followupPayment.amount || Number(followupPayment.amount) <= 0) {
+            addToast('Enter a valid payment amount.', 'error');
+            return;
+        }
+
+        try {
+            await createSalePayment(selectedBill.id, {
+                bill_id: selectedBill.id,
+                customer_id: selectedBill.customer_id || null,
+                amount: Number(followupPayment.amount),
+                payment_mode: followupPayment.payment_mode,
+                notes: followupPayment.notes || null,
+                reference_number: followupPayment.reference_number || null,
+            });
+            const refreshedBill = await getSale(selectedBill.id);
+            setSelectedBill(refreshedBill.data);
+            setFollowupPayment({ amount: '', payment_mode: 'Cash', notes: '', reference_number: '' });
+            await load();
+            addToast('Payment recorded.', 'success');
+        } catch (error) {
+            addToast(getApiErrorMessage(error, 'Failed to record payment'), 'error');
         }
     };
 
@@ -515,34 +566,7 @@ export default function Sales() {
 
     return (
         <div>
-            <div className="page-header">
-                <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-surface)', borderRadius: 10, padding: '0.25rem', border: '1px solid var(--border)' }}>
-                    {[['new', ShoppingCart, 'New Bill'], ['history', CheckCircle, 'History']].map(([key, Icon, label]) => (
-                        <button
-                            key={key}
-                            onClick={() => setView(key)}
-                            className="btn btn-sm"
-                            style={{
-                                background: view === key ? 'var(--accent)' : 'transparent',
-                                color: view === key ? '#fff' : 'var(--text-muted)',
-                            }}
-                        >
-                            <Icon size={14} /> {label}
-                        </button>
-                    ))}
-                </div>
-                {view === 'new' && (
-                    <div className="page-header-actions">
-                        {editingBillId && (
-                            <button className="btn btn-ghost btn-sm" onClick={resetBillForm}>Cancel Edit</button>
-                        )}
-                        <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
-                        <button className="btn btn-primary" onClick={saveBill} disabled={saving}>
-                            <Save size={14} /> {saving ? 'Saving…' : editingBillId ? 'Update Bill' : 'Save Bill'} <kbd className="kbd">Alt+↵</kbd>
-                        </button>
-                    </div>
-                )}
-            </div>
+            <ModuleTabs tabs={salesTabs} />
 
             {view === 'history' ? (
                 <div className="surface" style={{ overflow: 'hidden' }}>
@@ -632,7 +656,6 @@ export default function Sales() {
                             <div className="line-items-header">
                                 <div>
                                     <p className="line-items-title">Bill Items</p>
-                                    <p className="line-items-subtitle">Keep product entry full-width. Rows may grow taller, but they never push the page sideways.</p>
                                 </div>
                                 <div className="line-items-actions">
                                     <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}>
@@ -735,6 +758,66 @@ export default function Sales() {
                                 ))}
                             </div>
                         </div>
+                        <div style={{ marginTop: '1.25rem', display: 'grid', gap: '1rem' }}>
+                            <div>
+                                <p style={{ fontWeight: 600, marginBottom: '0.55rem' }}>Payment History</p>
+                                {!selectedBill?.payment_transactions?.length ? (
+                                    <div className="empty-state" style={{ minHeight: 120 }}><CheckCircle size={28} /><span>No payment history recorded</span></div>
+                                ) : (
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Mode</th>
+                                                <th>Reference</th>
+                                                <th>Note</th>
+                                                <th style={{ textAlign: 'right' }}>Amount</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {selectedBill.payment_transactions.map(payment => (
+                                                <tr key={payment.id}>
+                                                    <td>{new Date(payment.payment_date).toLocaleDateString('en-IN')}</td>
+                                                    <td>{payment.payment_mode}{payment.is_initial_payment ? ' (Initial)' : ''}</td>
+                                                    <td>{payment.reference_number || '—'}</td>
+                                                    <td>{payment.notes || '—'}</td>
+                                                    <td style={{ textAlign: 'right', color: 'var(--success)', fontWeight: 600 }}>₹{Number(payment.amount || 0).toFixed(2)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+
+                            {selectedBill?.outstanding_amount > 0 && (
+                                <div className="surface" style={{ padding: '1rem', borderRadius: 14 }}>
+                                    <p style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Add Payment</p>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.75rem' }}>
+                                        <div className="form-group">
+                                            <label className="form-label">Amount</label>
+                                            <input type="number" min={0} value={followupPayment.amount} onChange={event => setFollowupPayment(current => ({ ...current, amount: event.target.value }))} />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Mode</label>
+                                            <select value={followupPayment.payment_mode} onChange={event => setFollowupPayment(current => ({ ...current, payment_mode: event.target.value }))}>
+                                                {['Cash', 'UPI', 'Card', 'Credit'].map(mode => <option key={mode} value={mode}>{mode}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Reference</label>
+                                            <input value={followupPayment.reference_number} onChange={event => setFollowupPayment(current => ({ ...current, reference_number: event.target.value }))} placeholder="Optional reference" />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Note</label>
+                                            <input value={followupPayment.notes} onChange={event => setFollowupPayment(current => ({ ...current, notes: event.target.value }))} placeholder="Optional note" />
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.9rem' }}>
+                                        <button className="btn btn-primary btn-sm" onClick={saveAdditionalPayment}>Record Payment</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     <div className="entry-sidebar entry-sticky">
@@ -772,11 +855,11 @@ export default function Sales() {
                             <details className="compact-details">
                                 <summary>Payment</summary>
                                 <div className="compact-details__content">
-                                    <div className="payment-grid">
+                                    <div style={{ display: 'grid', gap: '0.85rem' }}>
                                         <div className="form-group">
                                             <label className="form-label">Payment Mode</label>
-                                            <div className="segment-control segment-control--triple">
-                                                {['Cash', 'UPI', 'Credit'].map(mode => (
+                                            <div className="segment-control" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', width: '100%' }}>
+                                                {['Cash', 'UPI', 'Card', 'Credit'].map(mode => (
                                                     <button
                                                         key={mode}
                                                         onClick={() => setPaymentMode(mode)}
@@ -791,15 +874,27 @@ export default function Sales() {
                                             <label className="form-label">Paid Amount</label>
                                             <input type="number" min={0} value={paidAmt} onChange={event => setPaidAmt(event.target.value)} placeholder={totals.grand.toFixed(2)} />
                                         </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Payment Note</label>
+                                            <input value={paymentNote} onChange={event => setPaymentNote(event.target.value)} placeholder="Optional note" />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Reference</label>
+                                            <input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} placeholder="Optional UPI/card/reference number" />
+                                        </div>
                                     </div>
-                                    {paidAmt !== '' && (
                                         <div className="summary-row">
                                             <span>Outstanding</span>
                                             <strong style={{ color: outstandingAmount > 0 ? 'var(--danger)' : 'var(--success)' }}>
                                                 {`₹${outstandingAmount.toFixed(2)}`}
                                             </strong>
                                         </div>
-                                    )}
+                                        {changeAmount > 0 && (
+                                            <div className="summary-row">
+                                                <span>Change</span>
+                                                <strong style={{ color: 'var(--warning)' }}>{`₹${changeAmount.toFixed(2)}`}</strong>
+                                            </div>
+                                        )}
                                 </div>
                             </details>
 
@@ -819,13 +914,6 @@ export default function Sales() {
                             </div>
                         </div>
 
-                        <div className="surface shortcut-panel">
-                            <p style={{ marginBottom: '0.3rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Keyboard shortcuts</p>
-                            <p><kbd className="kbd">Tab</kbd> - move between fields / select item</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+N</kbd> - add item row</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Enter</kbd> on last qty - new row</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+Enter</kbd> - save bill</p>
-                        </div>
                     </div>
                 </div>
             )}

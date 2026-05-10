@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import {
     LayoutDashboard, Package, ShoppingCart, Truck, Users,
-    ChevronLeft, ChevronRight, BarChart3, Settings
+    ChevronLeft, ChevronRight, BarChart3, Settings, RefreshCcw
 } from 'lucide-react';
 import { useKeyboardShortcut } from '../hooks/useKeyboard';
 
@@ -12,7 +12,9 @@ const navItems = [
     { name: 'Sales', path: '/sales', icon: ShoppingCart, shortcut: '3' },
     { name: 'Purchases', path: '/purchases', icon: Truck, shortcut: '4' },
     { name: 'Contacts', path: '/contacts', icon: Users, shortcut: '5' },
-    { name: 'Settings', path: '/settings', icon: Settings, shortcut: '6' },
+    { name: 'Accounting', path: '/daily-ledger', icon: BarChart3, shortcut: '6' },
+    { name: 'Returns & Adjustments', path: '/stock-returns', icon: RefreshCcw, shortcut: '7' },
+    { name: 'Settings', path: '/settings', icon: Settings },
 ];
 
 export default function Sidebar() {
@@ -22,6 +24,7 @@ export default function Sidebar() {
 
     // Alt+1..5 shortcuts
     navItems.forEach(item => {
+        if (!item.shortcut) return;
         // eslint-disable-next-line react-hooks/rules-of-hooks
         useKeyboardShortcut(item.shortcut, () => navigate(item.path));
     });
@@ -47,10 +50,12 @@ export default function Sidebar() {
             {/* Logo */}
             <div style={{
                 display: 'flex', alignItems: 'center', gap: '0.6rem',
-                padding: '1.1rem 1rem',
+                padding: '0 1rem',
                 borderBottom: '1px solid var(--line-soft)',
-                minHeight: '56px',
+                height: 'var(--topbar-height)',
+                background: 'color-mix(in oklch, var(--surface-1) 88%, black 12%)',
                 overflow: 'hidden',
+                flexShrink: 0,
             }}>
                 <div style={{
                     width: 32, height: 32, borderRadius: 9, flexShrink: 0,
@@ -80,7 +85,7 @@ export default function Sidebar() {
                         <Link
                             key={name}
                             to={path}
-                            title={collapsed ? `${name} (Alt+${shortcut})` : undefined}
+                            title={collapsed ? `${name}${shortcut ? ` (Alt+${shortcut})` : ''}` : undefined}
                             style={{
                                 display: 'flex', alignItems: 'center', gap: '0.65rem',
                                 padding: collapsed ? '0.7rem' : '0.65rem 0.8rem',
@@ -103,7 +108,7 @@ export default function Sidebar() {
                             {!collapsed && (
                                 <span className="sidebar-label" style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{name}</span>
                             )}
-                            {!collapsed && (
+                            {!collapsed && shortcut && (
                                 <kbd className="kbd" style={{ marginLeft: 'auto', opacity: 0.6 }}>Alt+{shortcut}</kbd>
                             )}
                         </Link>

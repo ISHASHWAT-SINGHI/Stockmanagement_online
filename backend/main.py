@@ -16,7 +16,7 @@ from sqlalchemy.future import select
 import database
 import models
 import tasks
-from routers import auth, contacts, products, purchases, reports, sales, settings
+from routers import accounting, auth, contacts, products, purchases, reports, sales, settings
 from security import get_password_hash
 
 logging.basicConfig(
@@ -45,6 +45,7 @@ app.include_router(products.router)
 app.include_router(contacts.router)
 app.include_router(purchases.router)
 app.include_router(sales.router)
+app.include_router(accounting.router)
 app.include_router(reports.router)
 app.include_router(settings.router)
 

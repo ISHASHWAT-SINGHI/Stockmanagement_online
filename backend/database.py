@@ -1,6 +1,5 @@
 import asyncio
 import os
-import ssl
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import NullPool
 
 # Load the backend-local .env no matter which directory uvicorn is started from.
 load_dotenv(Path(__file__).with_name(".env"))
@@ -63,7 +63,7 @@ def derive_supabase_direct_url(database_url: str) -> str | None:
 
 def get_candidate_database_urls() -> list[str]:
     primary_url = normalize_database_url(os.getenv("DATABASE_URL", ""))
-    candidates = [primary_url]
+    candidates = []
 
     fallback_url = os.getenv("DATABASE_FALLBACK_URL")
     if fallback_url:
@@ -72,6 +72,8 @@ def get_candidate_database_urls() -> list[str]:
     derived_direct_url = derive_supabase_direct_url(primary_url)
     if derived_direct_url:
         candidates.append(normalize_database_url(derived_direct_url))
+
+    candidates.append(primary_url)
 
     deduped_candidates = []
     for candidate in candidates:
@@ -83,19 +85,37 @@ def get_candidate_database_urls() -> list[str]:
 def get_engine_args(database_url: str) -> dict:
     parsed = make_url(database_url)
     if parsed.drivername.startswith("postgresql"):
-        return {
-            "connect_args": {
-                "ssl": "require",
-                "timeout": 30,
-                "command_timeout": 60,
-                "server_settings": {"application_name": "stockpro-api"},
-            },
-            "pool_pre_ping": True,
-            "pool_recycle": 280,
-            "pool_size": 3,
-            "max_overflow": 5,
-            "pool_timeout": 30,
+        connect_args = {
+            "timeout": 15,
+            "command_timeout": 30,
+            "server_settings": {"application_name": "stockpro-api"},
         }
+        engine_args = {
+            "connect_args": connect_args,
+            "pool_pre_ping": True,
+            "pool_recycle": 180,
+        }
+
+        if parsed.drivername == "postgresql+asyncpg":
+            connect_args["ssl"] = "require"
+            connect_args["statement_cache_size"] = 0
+
+        if (parsed.host or "").endswith(".pooler.supabase.com"):
+            engine_args.update(
+                {
+                    "poolclass": NullPool,
+                }
+            )
+        else:
+            engine_args.update(
+                {
+                    "pool_size": 5,
+                    "max_overflow": 10,
+                    "pool_timeout": 15,
+                }
+            )
+
+        return engine_args
     raise RuntimeError("This application is configured for online PostgreSQL only.")
 
 

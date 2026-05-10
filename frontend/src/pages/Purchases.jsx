@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Plus, Trash2, Truck, Save, ClipboardList, Eye } from 'lucide-react';
 import { getProducts, getSuppliers, getPurchaseInvoices, createPurchaseInvoice, getPurchaseInvoice } from '../api';
 import { useKeyboardShortcut } from '../hooks/useKeyboard';
 import { useToast } from '../hooks/useToast';
 import Modal from '../components/Modal';
+import ModuleTabs from '../components/ModuleTabs';
 
 function emptyItem() {
     return { product_id: '', product_name: '', quantity: 1, unit_price: 0, gst_percent: 12, line_total: 0 };
@@ -95,6 +97,7 @@ function createClientRequestId() {
 
 export default function Purchases() {
     const { addToast } = useToast();
+    const location = useLocation();
     const [products, setProducts] = useState([]);
     const [suppliers, setSuppliers] = useState([]);
     const [invoices, setInvoices] = useState([]);
@@ -112,6 +115,10 @@ export default function Purchases() {
     
     const [productSuggestions, setProductSuggestions] = useState({ index: null, list: [], activeIdx: -1 });
     const [selectedInvoice, setSelectedInvoice] = useState(null);
+    const purchaseTabs = [
+        { label: 'New Invoice', path: '/purchases', end: true },
+        { label: 'Purchase History', path: '/purchases/history' },
+    ];
     
     const itemRefs = useRef([]);
     const productInputRefs = useRef([]);
@@ -146,6 +153,9 @@ export default function Purchases() {
     }, [addToast]);
 
     useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        setView(location.pathname === '/purchases/history' ? 'history' : 'new');
+    }, [location.pathname]);
 
     useKeyboardShortcut('n', () => addRow(true), { alt: true, allowInInput: true });
 
@@ -365,24 +375,7 @@ export default function Purchases() {
 
     return (
         <div>
-            <div className="page-header">
-                <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-surface)', borderRadius: 10, padding: '0.25rem', border: '1px solid var(--border)' }}>
-                    {[['new', Truck, 'New Invoice'], ['history', ClipboardList, 'History']].map(([key, Icon, label]) => (
-                        <button key={key} onClick={() => setView(key)} className="btn btn-sm" style={{
-                            background: view === key ? 'var(--accent)' : 'transparent',
-                            color: view === key ? '#fff' : 'var(--text-muted)',
-                        }}><Icon size={14} /> {label}</button>
-                    ))}
-                </div>
-                {view === 'new' && (
-                    <div className="page-header-actions">
-                        <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
-                        <button className="btn btn-primary" onClick={saveInvoice} disabled={saving}>
-                            <Save size={14} /> {saving ? 'Saving…' : 'Save Invoice'} <kbd className="kbd">Alt+↵</kbd>
-                        </button>
-                    </div>
-                )}
-            </div>
+            <ModuleTabs tabs={purchaseTabs} />
 
             {view === 'history' ? (
                 <div className="surface" style={{ overflow: 'hidden' }}>
@@ -456,9 +449,6 @@ export default function Purchases() {
                                             Inclusive
                                         </button>
                                     </div>
-                                    <span className="line-item-secondary">
-                                        {priceIncludesTax ? 'Enter the GST-inclusive price. The stored unit price is back-calculated.' : 'Enter the base unit price. GST is added into each row total.'}
-                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -467,7 +457,6 @@ export default function Purchases() {
                             <div className="line-items-header">
                                 <div>
                                     <p className="line-items-title">Invoice Items</p>
-                                    <p className="line-items-subtitle">Only the essential columns stay visible so product entry always fits inside the page.</p>
                                 </div>
                                 <div className="line-items-actions">
                                     <button className="btn btn-ghost btn-sm" onClick={() => addRow(true)}><Plus size={14} /> Add Row <kbd className="kbd">Alt+N</kbd></button>
@@ -575,7 +564,6 @@ export default function Purchases() {
                                     <span style={{ color: 'var(--accent)' }}>{`₹${totalAmount.toFixed(2)}`}</span>
                                 </div>
                             </div>
-                            <div className="summary-note">The summary only stays beside the form on roomy screens. On tighter layouts it stacks below to protect line-item width.</div>
                             <div className="summary-actions">
                                 <button className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={saveInvoice} disabled={saving}>
                                     <Save size={15} /> {saving ? 'Saving...' : 'Save Invoice'} <kbd className="kbd" style={{ marginLeft: '0.25rem' }}>Alt+Enter</kbd>
@@ -583,12 +571,6 @@ export default function Purchases() {
                             </div>
                         </div>
 
-                        <div className="surface shortcut-panel">
-                            <p style={{ marginBottom: '0.3rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Keyboard shortcuts</p>
-                            <p><kbd className="kbd">Tab</kbd> - move between fields and pick suggestions</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+N</kbd> - add item row</p>
-                            <p style={{ marginTop: '0.2rem' }}><kbd className="kbd">Alt+Enter</kbd> - save invoice</p>
-                        </div>
                     </div>
                 </div>
             )}

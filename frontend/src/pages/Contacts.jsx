@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useOutletContext } from 'react-router-dom';
 import { Plus, Users, Building2, Pencil, Eye } from 'lucide-react';
 import { getCustomers, createCustomer, updateCustomer, getSuppliers, createSupplier, updateSupplier, getCustomerLedger } from '../api';
 import { useKeyboardShortcut } from '../hooks/useKeyboard';
@@ -10,8 +9,8 @@ const emptyC = { name: '', phone: '', gst_number: '', address: '' };
 const emptyS = { company_name: '', phone: '', email: '', gst_number: '', address: '' };
 
 export default function Contacts() {
-    const { searchQuery } = useOutletContext();
     const { addToast } = useToast();
+    const [searchQuery, setSearchQuery] = useState('');
     const [tab, setTab] = useState('customers');
     const [customers, setCustomers] = useState([]);
     const [suppliers, setSuppliers] = useState([]);
@@ -23,6 +22,12 @@ export default function Contacts() {
     const [ledgerModal, setLedgerModal] = useState(false);
     const [saving, setSaving] = useState(false);
 
+    const getApiErrorMessage = (error, fallback) => {
+        const message = error?.response?.data?.detail || error?.message || fallback;
+        const requestId = error?.response?.headers?.['x-request-id'] || error?.response?.data?.request_id;
+        return requestId ? `${message} (Ref: ${requestId})` : message;
+    };
+
     const loadCustomers = useCallback(async () => {
         const r = await getCustomers(); setCustomers(r.data);
     }, []);
@@ -33,9 +38,20 @@ export default function Contacts() {
 
     const load = useCallback(async () => {
         setLoading(true);
-        try { await Promise.all([loadCustomers(), loadSuppliers()]); }
-        catch { addToast('Failed to load contacts', 'error'); }
-        finally { setLoading(false); }
+        const [customersResult, suppliersResult] = await Promise.allSettled([
+            loadCustomers(),
+            loadSuppliers(),
+        ]);
+
+        if (customersResult.status === 'rejected') {
+            addToast(getApiErrorMessage(customersResult.reason, 'Failed to load customers'), 'error');
+        }
+
+        if (suppliersResult.status === 'rejected') {
+            addToast(getApiErrorMessage(suppliersResult.reason, 'Failed to load suppliers'), 'error');
+        }
+
+        setLoading(false);
     }, [loadCustomers, loadSuppliers, addToast]);
 
     useEffect(() => { load(); }, [load]);
@@ -94,6 +110,13 @@ export default function Contacts() {
                 <button className="btn btn-primary" onClick={openAdd}>
                     <Plus size={15} /> {isCustomers ? 'New Customer' : 'New Supplier'} <kbd className="kbd">Alt+N</kbd>
                 </button>
+            </div>
+
+            <div className="surface" style={{ padding: '1rem' }}>
+                <div className="form-group" style={{ maxWidth: 360 }}>
+                    <label className="form-label">Search Contacts</label>
+                    <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search customers or suppliers" />
+                </div>
             </div>
 
             <div className="surface" style={{ overflow: 'hidden' }}>

@@ -1,9 +1,11 @@
 """routers/products.py — Products, barcodes, and stock endpoints."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, asc, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
 
+from accounting import DAMAGE_ADJUSTMENT_TYPES, apply_non_sellable_stock_move
 import models
 import schemas
 from database import get_db
@@ -15,10 +17,75 @@ router = APIRouter(prefix="/api/v1", tags=["products"], dependencies=[Depends(ge
 # ─── Products ────────────────────────────────────────────────────────────────
 
 @router.get("/products", response_model=List[schemas.ProductResponse])
-async def get_products(skip: int = 0, limit: int = 200, include_archived: bool = False, db: AsyncSession = Depends(get_db)):
+async def get_products(
+    skip: int = 0,
+    limit: int = 200,
+    include_archived: bool = False,
+    search: str | None = Query(default=None),
+    brand: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    stock_status: str | None = Query(default=None),
+    gst_rate: float | None = Query(default=None),
+    sort_by: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     query = select(models.Product).where(models.Product.is_deleted == False)
     if not include_archived:
         query = query.where(models.Product.is_archived == False)
+
+    if search:
+        pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                models.Product.product_name.ilike(pattern),
+                models.Product.brand_name.ilike(pattern),
+                models.Product.category.ilike(pattern),
+            )
+        )
+
+    if brand:
+        query = query.where(models.Product.brand_name == brand)
+
+    if category:
+        query = query.where(models.Product.category == category)
+
+    if gst_rate is not None:
+        query = query.where(models.Product.tax_rate == gst_rate)
+
+    if stock_status == "in_stock":
+        query = query.where(models.Product.current_stock > 0)
+    elif stock_status == "out_of_stock":
+        query = query.where(models.Product.current_stock <= 0)
+    elif stock_status == "low_stock":
+        query = query.where(
+            and_(
+                models.Product.current_stock > 0,
+                or_(
+                    and_(
+                        models.Product.min_stock_level.is_not(None),
+                        models.Product.min_stock_level > 0,
+                        models.Product.current_stock <= models.Product.min_stock_level,
+                    ),
+                    and_(
+                        or_(models.Product.min_stock_level.is_(None), models.Product.min_stock_level <= 0),
+                        models.Product.current_stock <= 5,
+                    ),
+                ),
+            )
+        )
+
+    sort_options = {
+        "name_asc": asc(models.Product.product_name),
+        "name_desc": desc(models.Product.product_name),
+        "stock_asc": asc(models.Product.current_stock),
+        "stock_desc": desc(models.Product.current_stock),
+        "price_asc": asc(models.Product.tax_rate),
+        "price_desc": desc(models.Product.tax_rate),
+        "recently_added": desc(models.Product.created_at),
+        "recently_updated": desc(models.Product.updated_at),
+    }
+    query = query.order_by(sort_options.get(sort_by or "", asc(models.Product.product_name)), asc(models.Product.id))
+
     result = await db.execute(query.offset(skip).limit(limit))
     return result.scalars().all()
 
@@ -199,26 +266,43 @@ async def create_stock_adjustment(
             raise HTTPException(status_code=400, detail="Batch does not belong to this product")
 
         # Calculate adjustments
-        prev_batch_stock = batch.available_quantity
-        new_batch_stock = prev_batch_stock + adjustment.quantity
+        prev_batch_stock = int(batch.available_quantity or 0)
+        qty = int(adjustment.quantity or 0)
+        adjustment_type = adjustment.adjustment_type.strip().upper()
 
-        if new_batch_stock < 0:
-            raise HTTPException(status_code=400, detail=f"Cannot reduce stock below zero. Current batch stock: {prev_batch_stock}")
-
-        # Apply changes
-        batch.available_quantity = new_batch_stock
-        product.current_stock += adjustment.quantity
+        if adjustment_type in DAMAGE_ADJUSTMENT_TYPES:
+            (
+                batch.available_quantity,
+                batch.non_sellable_quantity,
+                product.current_stock,
+                product.non_sellable_stock,
+            ) = apply_non_sellable_stock_move(
+                batch.available_quantity,
+                batch.non_sellable_quantity,
+                product.current_stock,
+                product.non_sellable_stock,
+                qty,
+            )
+            recorded_quantity = -abs(qty)
+        else:
+            new_batch_stock = prev_batch_stock + qty
+            if new_batch_stock < 0:
+                raise HTTPException(status_code=400, detail=f"Cannot reduce stock below zero. Current batch stock: {prev_batch_stock}")
+            batch.available_quantity = new_batch_stock
+            product.current_stock += qty
+            recorded_quantity = qty
 
         # Create Adjustment Record
         db_adj = models.StockAdjustment(
             product_id=product.id,
             stock_batch_id=batch.id,
-            adjustment_type=adjustment.adjustment_type,
-            quantity=adjustment.quantity,
+            adjustment_type=adjustment_type,
+            quantity=recorded_quantity,
             reason=adjustment.reason,
             adjusted_by=current_user.username,
+            final_action=adjustment.final_action,
             previous_stock=prev_batch_stock,
-            new_stock=new_batch_stock
+            new_stock=batch.available_quantity,
         )
         db.add(db_adj)
         await db.flush()
@@ -226,8 +310,8 @@ async def create_stock_adjustment(
         # Create Ledger Entry
         db.add(models.StockLedger(
             product_id=product.id,
-            transaction_type="ADJUSTMENT",
-            quantity=adjustment.quantity,
+            transaction_type="ADJUSTMENT" if adjustment_type not in DAMAGE_ADJUSTMENT_TYPES else "NON_SELLABLE_ADJUSTMENT",
+            quantity=recorded_quantity,
             reference_id=db_adj.id,
             notes=f"{adjustment.adjustment_type}: {adjustment.reason}" if adjustment.reason else adjustment.adjustment_type
         ))
@@ -242,3 +326,11 @@ async def create_stock_adjustment(
     except Exception as e:
         await db.rollback()
         raise e
+
+
+@router.get("/stock-adjustments", response_model=List[schemas.StockAdjustmentResponse])
+async def get_stock_adjustments(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(models.StockAdjustment).order_by(models.StockAdjustment.created_at.desc(), models.StockAdjustment.id.desc())
+    )
+    return result.scalars().all()

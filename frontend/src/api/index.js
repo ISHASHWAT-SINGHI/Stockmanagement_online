@@ -82,7 +82,7 @@ api.interceptors.response.use(res => res, onResponseError);
 auth.interceptors.response.use(res => res, onResponseError);
 
 // Products
-export const getProducts = (include_archived = false) => api.get(`/products?include_archived=${include_archived}`);
+export const getProducts = (include_archived = false, params = {}) => api.get('/products', { params: { include_archived, ...params } });
 export const getProduct = (id) => api.get(`/products/${id}`);
 export const createProduct = (data) => api.post('/products', data);
 export const updateProduct = (id, data) => api.put(`/products/${id}`, data);
@@ -105,7 +105,10 @@ export const getCustomers = () => api.get('/customers');
 export const getCustomer = (id) => api.get(`/customers/${id}`);
 export const createCustomer = (data) => api.post('/customers', data);
 export const updateCustomer = (id, data) => api.put(`/customers/${id}`, data);
-export const getCustomerLedger = (id) => api.get(`/customers/${id}/ledger`);
+export const getCustomerLedger = (id, historyLimit = 50) => api.get(`/customers/${id}/ledger?history_limit=${historyLimit}`);
+export const getCustomerLedgerOverview = (params = {}) => api.get('/customers/ledger-overview', { params });
+export const getSupplierLedger = (id, historyLimit = 50) => api.get(`/suppliers/${id}/ledger?history_limit=${historyLimit}`);
+export const getSupplierLedgerOverview = (params = {}) => api.get('/suppliers/ledger-overview', { params });
 
 // Purchase Invoices
 export const getPurchaseInvoices = () => api.get('/purchase-invoices');
@@ -121,15 +124,43 @@ export const getSales = () => api.get('/sales');
 export const getSale = (id) => api.get(`/sales/${id}`);
 export const createSale = (data) => api.post('/sales', data);
 export const updateSale = (id, data) => api.put(`/sales/${id}`, data);
+export const getSalePayments = (billId) => api.get(`/sales/${billId}/payments`);
+export const createSalePayment = (billId, data) => api.post(`/sales/${billId}/payments`, data);
 
 // Payments
+export const getPayments = () => api.get('/payments');
 export const createPayment = (data) => api.post('/payments', data);
 
 // Stock Ledger
 export const getStockLedger = (productId) =>
     api.get(`/stock-ledger${productId ? `?product_id=${productId}` : ''}`);
 
+export const getStockAdjustments = () => api.get('/stock-adjustments');
 export const adjustStock = (data) => api.post('/stock-adjustments', data);
+
+// Daily Ledger
+export const getDailyLedger = (ledgerDate) => api.get(`/daily-ledger?ledger_date=${ledgerDate}`);
+export const getAccountingSummary = () => api.get('/accounting/summary');
+
+// Credit Notes
+export const getCreditNotes = () => api.get('/credit-notes');
+export const getCreditNote = (id) => api.get(`/credit-notes/${id}`);
+export const createCreditNote = (data) => api.post('/credit-notes', data);
+
+// Sales Returns
+export const getSalesReturns = () => api.get('/sales-returns');
+export const getSalesReturn = (id) => api.get(`/sales-returns/${id}`);
+export const createSalesReturn = (data) => api.post('/sales-returns', data);
+
+// Supplier Stock Returns
+export const getStockReturns = () => api.get('/stock-returns');
+export const getStockReturn = (id) => api.get(`/stock-returns/${id}`);
+export const createStockReturn = (data) => api.post('/stock-returns', data);
+export const updateStockReturn = (id, data) => api.put(`/stock-returns/${id}`, data);
+
+// Supplier Payments
+export const getSupplierPayments = () => api.get('/supplier-payments');
+export const createSupplierPayment = (data) => api.post('/supplier-payments', data);
 
 // Business Settings
 export const getBusinessSettings = () => api.get('/settings/business');

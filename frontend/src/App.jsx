@@ -7,6 +7,13 @@ import Products from './pages/Products';
 import Sales from './pages/Sales';
 import Purchases from './pages/Purchases';
 import Contacts from './pages/Contacts';
+import DailyLedger from './pages/DailyLedger';
+import CreditNotes from './pages/CreditNotes';
+import SalesReturns from './pages/SalesReturns';
+import StockReturns from './pages/StockReturns';
+import CustomerLedger from './pages/CustomerLedger';
+import SupplierLedger from './pages/SupplierLedger';
+import Payments from './pages/Payments';
 import Login from './pages/Login';
 import ChangePassword from './pages/ChangePassword';
 import Settings from './pages/Settings';
@@ -33,8 +40,19 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="products" element={<Products />} />
             <Route path="sales" element={<Sales />} />
+            <Route path="sales/history" element={<Sales />} />
             <Route path="purchases" element={<Purchases />} />
+            <Route path="purchases/history" element={<Purchases />} />
             <Route path="contacts" element={<Contacts />} />
+            <Route path="daily-ledger" element={<DailyLedger />} />
+            <Route path="credit-notes" element={<CreditNotes />} />
+            <Route path="sales-returns" element={<SalesReturns />} />
+            <Route path="stock-returns" element={<StockReturns />} />
+            <Route path="stock-adjustments" element={<StockReturns />} />
+            <Route path="returns-history" element={<StockReturns />} />
+            <Route path="customer-ledger" element={<CustomerLedger />} />
+            <Route path="supplier-ledger" element={<SupplierLedger />} />
+            <Route path="payments" element={<Payments />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
