@@ -274,6 +274,7 @@ def render_bill_snapshot_html(
     customer_name = customer.name if customer else "Walk-in Customer"
     customer_address = customer.address if customer and customer.address else ""
     customer_phone = customer.phone if customer and customer.phone else ""
+    customer_gst_html = escape(customer.gst_number) if customer and customer.gst_number else "&nbsp;"
 
     rows = []
     for index, item in enumerate(bill.sales_items or [], start=1):
@@ -325,6 +326,7 @@ def render_bill_snapshot_html(
       <div>{escape(customer_name)}</div>
       <div>{escape(customer_address)}</div>
       <div>{escape(customer_phone)}</div>
+      <div>GSTIN: {customer_gst_html}</div>
     </div>
     <div style="text-align:right">
       <div class="strong">{escape(bill.bill_number)}</div>

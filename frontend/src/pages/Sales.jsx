@@ -1008,6 +1008,7 @@ export default function Sales() {
                                 <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '3px' }}>{printCustomer?.name || 'Walk-in Customer'}</div>
                                 {printCustomer?.address && <div style={{ marginBottom: '3px' }}>{printCustomer.address}</div>}
                                 {printCustomer?.phone && <div>Phone: {printCustomer.phone}</div>}
+                                <div>GSTIN: {printCustomer?.gst_number || '\u00A0'}</div>
                             </div>
                             <div style={{ textAlign: 'right', minWidth: '180px' }}>
                                 <div style={{ fontSize: '11px', color: '#555', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '5px' }}>Bill Details</div>
