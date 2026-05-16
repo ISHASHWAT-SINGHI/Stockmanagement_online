@@ -128,7 +128,7 @@ export default function Sales() {
     const [items, setItems] = useState([emptyItem()]);
     const [discountAmt, setDiscountAmt] = useState(0);
     const [isDiscountPercent, setIsDiscountPercent] = useState(false);
-    const [paymentMode, setPaymentMode] = useState('Cash');
+    const [paymentMode, setPaymentMode] = useState('Credit');
     const [paidAmt, setPaidAmt] = useState('');
     const [paymentNote, setPaymentNote] = useState('');
     const [paymentReference, setPaymentReference] = useState('');
@@ -200,7 +200,7 @@ export default function Sales() {
         setItems([emptyItem()]);
         setDiscountAmt(0);
         setIsDiscountPercent(false);
-        setPaymentMode('Cash');
+        setPaymentMode('Credit');
         setPaidAmt('');
         setPaymentNote('');
         setPaymentReference('');
@@ -407,7 +407,7 @@ export default function Sales() {
         setItems(restoredItems.length > 0 ? restoredItems : [emptyItem()]);
         setDiscountAmt(billData.discount_amount || 0);
         setIsDiscountPercent(false);
-        setPaymentMode(billData.payment_mode || 'Cash');
+        setPaymentMode(billData.payment_mode || (Number(billData.paid_amount) > 0 ? 'Cash' : 'Credit'));
         setPaidAmt(billData.paid_amount != null ? String(billData.paid_amount) : '');
         setPaymentNote('');
         setPaymentReference('');
@@ -429,7 +429,7 @@ export default function Sales() {
     const totals = calcBill(items.filter(item => item.product_id), discountAmt, isDiscountPercent);
     const totalQuantity = getTotalQuantity(items.filter(item => item.product_id));
     const totalTax = +(totals.cgst + totals.sgst).toFixed(2);
-    const paidAmountValue = paidAmt === '' ? totals.grand : Number(paidAmt) || 0;
+    const paidAmountValue = paidAmt === '' ? 0 : Number(paidAmt) || 0;
     const appliedPaidAmount = Math.min(paidAmountValue, totals.grand);
     const outstandingAmount = Math.max(0, totals.grand - appliedPaidAmount);
     const changeAmount = Math.max(0, paidAmountValue - totals.grand);
@@ -449,7 +449,7 @@ export default function Sales() {
         }
 
         const billTotals = calcBill(validItems, discountAmt, isDiscountPercent);
-        const paid = paidAmt === '' ? billTotals.grand : parseFloat(paidAmt);
+        const paid = paidAmt === '' ? 0 : parseFloat(paidAmt);
         const outstanding = Math.max(0, billTotals.grand - paid);
         const payload = {
             customer_id: customerId || null,
@@ -872,7 +872,7 @@ export default function Sales() {
                                         </div>
                                         <div className="form-group">
                                             <label className="form-label">Paid Amount</label>
-                                            <input type="number" min={0} value={paidAmt} onChange={event => setPaidAmt(event.target.value)} placeholder={totals.grand.toFixed(2)} />
+                                            <input type="number" min={0} value={paidAmt} onChange={event => setPaidAmt(event.target.value)} placeholder={paymentMode === 'Credit' ? '0.00' : totals.grand.toFixed(2)} />
                                         </div>
                                         <div className="form-group">
                                             <label className="form-label">Payment Note</label>
@@ -1080,7 +1080,7 @@ export default function Sales() {
                                         <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: '15px', fontWeight: 'bold' }}>Grand Total:</td>
                                         <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: '15px', fontWeight: 'bold' }}>₹{selectedBill.grand_total.toFixed(2)}</td>
                                     </tr>
-                                    {selectedBill.payment_mode && (
+                                    {selectedBill.paid_amount > 0 && selectedBill.payment_mode && (
                                         <tr>
                                             <td colSpan="2" style={{ padding: '5px 6px', textAlign: 'right', fontStyle: 'italic' }}>
                                                 Paid via {selectedBill.payment_mode}

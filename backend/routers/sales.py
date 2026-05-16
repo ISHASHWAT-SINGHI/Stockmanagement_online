@@ -216,11 +216,10 @@ def build_sale_payment_fields(bill: schemas.SalesBillCreate) -> dict:
         exclude_none=True,
     )
 
-    if payment_mode is None:
-        if payment_state.applied_paid_amount > 0:
-            payment_mode = "Cash"
-        elif payment_state.outstanding_amount > 0:
-            payment_mode = "Credit"
+    if payment_state.applied_paid_amount <= 0 and payment_state.outstanding_amount > 0:
+        payment_mode = "Credit"
+    elif payment_mode is None and payment_state.applied_paid_amount > 0:
+        payment_mode = "Cash"
 
     bill_dict.update(
         {
