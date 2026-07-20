@@ -474,7 +474,7 @@ export default function Purchases() {
                                 {items.map((it, i) => {
                                     const currentProduct = products.find(product => product.id === it.product_id);
                                     return (
-                                        <div key={i} className="line-item-row line-item-grid purchase-line-item-grid">
+                                        <div key={i} className="line-item-row line-item-grid purchase-line-item-grid" style={productSuggestions.index === i && productSuggestions.list.length > 0 ? { zIndex: 100 } : undefined}>
                                             <div className="line-item-cell line-item-cell--product">
                                                 <span className="line-item-cell-label">Product</span>
                                                 <div className="line-item-product">

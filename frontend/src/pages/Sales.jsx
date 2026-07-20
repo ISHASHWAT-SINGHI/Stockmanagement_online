@@ -674,7 +674,7 @@ export default function Sales() {
                                     <div className="line-item-head line-item-head--action" aria-hidden="true"> </div>
                                 </div>
                                 {items.map((item, index) => (
-                                    <div key={index} className="line-item-row line-item-grid sales-line-item-grid">
+                                    <div key={index} className="line-item-row line-item-grid sales-line-item-grid" style={productSuggestions.index === index && productSuggestions.list.length > 0 ? { zIndex: 100 } : undefined}>
                                         <div className="line-item-cell line-item-cell--product">
                                             <span className="line-item-cell-label">Product</span>
                                             <div className="line-item-product">

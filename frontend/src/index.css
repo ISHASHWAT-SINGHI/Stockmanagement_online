@@ -923,7 +923,7 @@
   .line-items-surface {
     width: 100%;
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
     border: 1px solid var(--line-subtle);
     border-radius: var(--radius-lg);
     background: var(--panel-bg);
@@ -1019,6 +1019,7 @@
   }
 
   .line-item-row {
+    position: relative;
     padding: 0.9rem 1rem;
     border-top: 1px solid var(--line-subtle);
     min-width: 0;
