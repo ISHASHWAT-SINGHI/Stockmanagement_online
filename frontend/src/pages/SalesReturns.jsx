@@ -4,6 +4,24 @@ import { createSalesReturn, getSale, getSales, getSalesReturns } from '../api';
 import { useToast } from '../hooks/useToast';
 import ModuleTabs from '../components/ModuleTabs';
 
+// Screen options and what the API stores for each (settlement_type + refund_mode).
+const SETTLEMENT_OPTIONS = [
+    { label: 'Cash Refund', settlement_type: 'Refund', refund_mode: 'Cash' },
+    { label: 'UPI Refund', settlement_type: 'Refund', refund_mode: 'UPI' },
+    { label: 'Adjust Against Due', settlement_type: 'Adjust Outstanding', refund_mode: null },
+    { label: 'Customer Credit / Store Credit', settlement_type: 'Credit Note', refund_mode: null },
+    { label: 'No Refund', settlement_type: 'No Refund', refund_mode: null },
+];
+const DEFAULT_SETTLEMENT = 'Customer Credit / Store Credit';
+
+function getSettlementLabel(entry) {
+    const match = SETTLEMENT_OPTIONS.find(option => (
+        option.settlement_type === entry.settlement_type && option.refund_mode === (entry.refund_mode || null)
+    ));
+    if (match) return match.label;
+    return entry.refund_mode ? `${entry.refund_mode} Refund` : entry.settlement_type;
+}
+
 function getToday() {
     return new Date().toISOString().slice(0, 10);
 }
@@ -41,7 +59,7 @@ export default function SalesReturns() {
     const [selectedBill, setSelectedBill] = useState(null);
     const [billSearch, setBillSearch] = useState('');
     const [returnDate, setReturnDate] = useState(getToday());
-    const [settlementType, setSettlementType] = useState('Customer Credit / Store Credit');
+    const [settlementType, setSettlementType] = useState(DEFAULT_SETTLEMENT);
     const [reason, setReason] = useState('');
     const [notes, setNotes] = useState('');
     const [itemForms, setItemForms] = useState({});
@@ -178,6 +196,8 @@ export default function SalesReturns() {
             return;
         }
 
+        const settlement = SETTLEMENT_OPTIONS.find(option => option.label === settlementType);
+
         setSaving(true);
         try {
             await createSalesReturn({
@@ -185,7 +205,8 @@ export default function SalesReturns() {
                 customer_id: selectedBill.customer_id || null,
                 return_date: returnDate,
                 reason: reason.trim(),
-                settlement_type: settlementType,
+                settlement_type: settlement.settlement_type,
+                refund_mode: settlement.refund_mode,
                 notes: notes.trim() || null,
                 items,
             });
@@ -194,7 +215,7 @@ export default function SalesReturns() {
             setSelectedBill(null);
             setBillSearch('');
             setReturnDate(getToday());
-            setSettlementType('Customer Credit / Store Credit');
+            setSettlementType(DEFAULT_SETTLEMENT);
             setReason('');
             setNotes('');
             setItemForms({});
@@ -288,11 +309,9 @@ export default function SalesReturns() {
                     <div className="form-group">
                         <label className="form-label">Settlement</label>
                         <select value={settlementType} onChange={(event) => setSettlementType(event.target.value)}>
-                            <option value="Cash Refund">Cash Refund</option>
-                            <option value="UPI Refund">UPI Refund</option>
-                            <option value="Adjust Against Due">Adjust Against Due</option>
-                            <option value="Customer Credit / Store Credit">Customer Credit / Store Credit</option>
-                            <option value="No Refund">No Refund</option>
+                            {SETTLEMENT_OPTIONS.map(option => (
+                                <option key={option.label} value={option.label}>{option.label}</option>
+                            ))}
                         </select>
                     </div>
                     <div className="form-group">
@@ -435,7 +454,7 @@ export default function SalesReturns() {
                                         <td style={{ fontWeight: 600 }}>{entry.return_number || `SR-${entry.id}`}</td>
                                         <td>{new Date(entry.return_date).toLocaleDateString('en-IN')}</td>
                                         <td>{entry.bill_id ? `Bill #${entry.bill_id}` : '—'}</td>
-                                        <td>{entry.settlement_type}</td>
+                                        <td>{getSettlementLabel(entry)}</td>
                                         <td>{entry.status}</td>
                                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(entry.total_amount)}</td>
                                     </tr>

@@ -83,6 +83,9 @@ export default function DailyLedger() {
             title: 'Returns and Adjustments',
             rows: [
                 ['Sales Returns', ledger?.sales_returns],
+                ['Cash Refunds', ledger?.cash_refunds],
+                ['UPI Refunds', ledger?.upi_refunds],
+                ['Card Refunds', ledger?.card_refunds],
                 ['Stock Return Credit', ledger?.stock_return_credit],
             ],
         },
@@ -90,7 +93,8 @@ export default function DailyLedger() {
             title: 'Payment Method Summary',
             rows: [
                 ['Purchase Payments', ledger?.purchase_payments],
-                ['Net Movement', Number(ledger?.total_collection || 0) - Number(ledger?.purchase_payments || 0)],
+                ['Refunds Paid Out', ledger?.total_refunds],
+                ['Net Movement', Number(ledger?.total_collection || 0) - Number(ledger?.purchase_payments || 0) - Number(ledger?.total_refunds || 0)],
             ],
         },
     ];
