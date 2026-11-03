@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from typing import List
 
 from accounting import ensure_customer_ledger, ensure_supplier_ledger, sync_customer_ledger, sync_supplier_ledger
@@ -344,6 +345,7 @@ async def get_customer_ledger(
     )
     sales_returns_result = await db.execute(
         select(models.SalesReturn)
+        .options(selectinload(models.SalesReturn.items))
         .where(models.SalesReturn.customer_id == customer_id)
         .order_by(models.SalesReturn.return_date.desc(), models.SalesReturn.id.desc())
         .limit(history_limit)
@@ -399,6 +401,7 @@ async def get_supplier_ledger(
     )
     stock_returns_result = await db.execute(
         select(models.SupplierStockReturn)
+        .options(selectinload(models.SupplierStockReturn.items))
         .where(models.SupplierStockReturn.supplier_id == supplier_id)
         .order_by(models.SupplierStockReturn.return_date.desc(), models.SupplierStockReturn.id.desc())
         .limit(history_limit)
