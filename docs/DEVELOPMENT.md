@@ -60,14 +60,34 @@ Leave `VITE_API_URL` unset locally so the Vite proxy forwards `/api` and `/auth`
 
 ## Tests
 
-The backend has a `unittest` suite for the pure business rules in `accounting.py`:
+The backend has two `unittest` suites in `backend/tests/`:
+
+| File | What it covers | Needs a database? |
+|---|---|---|
+| `test_accounting_workflows.py` | Pure business rules in `accounting.py`: payment state, follow-up payments, return allocation, stock moves, ledger and daily-ledger totals | No |
+| `test_api_workflows.py` | The real HTTP endpoints end to end (purchase → sale → returns → ledgers), including regression tests for fixed bugs | Yes: a **throwaway local** PostgreSQL. Skipped when `TEST_DATABASE_URL` is unset. |
 
 ```bash
 cd backend
-venv\Scripts\python -m unittest discover -s tests -v
+venv\Scripts\python -m unittest discover -s tests -v        # API tests are skipped
 ```
 
-Importing `accounting` imports `database`, which builds (but does not connect) an engine at import time, so `DATABASE_URL` must be set (`secrets/backend.env` is enough). The suite covers payment state, follow-up payments, return allocation, stock moves, and ledger and daily-ledger totals. Router and database behavior has **no automated tests**, and the frontend has none either. Verify those flows by hand against a non-production database.
+To run the API tests too, start a disposable PostgreSQL on a spare port. **Never use the real database: the test drops and recreates every table**, and it refuses any host other than localhost.
+
+```bash
+# one-time: create a throwaway cluster (paths shown for PostgreSQL 18 on Windows)
+"C:\Program Files\PostgreSQL\18\bin\initdb" -D %TEMP%\stockpro-pg -U postgres --auth=trust
+"C:\Program Files\PostgreSQL\18\bin\pg_ctl" -D %TEMP%\stockpro-pg -o "-p 55432 -c listen_addresses=localhost" -l %TEMP%\stockpro-pg.log start
+"C:\Program Files\PostgreSQL\18\bin\psql" -h localhost -p 55432 -U postgres -c "create database stockpro_test"
+
+# each run (Git Bash syntax; in PowerShell set $env:TEST_DATABASE_URL first)
+TEST_DATABASE_URL=postgresql+asyncpg://postgres@localhost:55432/stockpro_test venv/Scripts/python -m unittest discover -s tests -v
+
+# when done
+"C:\Program Files\PostgreSQL\18\bin\pg_ctl" -D %TEMP%\stockpro-pg stop
+```
+
+The API tests override the database and auth dependencies and write bill snapshots to a temp folder. The frontend has no automated tests yet.
 
 ## Database migrations
 
