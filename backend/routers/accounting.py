@@ -14,6 +14,7 @@ from accounting import (
     CREDIT_NOTE_STATUSES,
     DAMAGE_ADJUSTMENT_TYPES,
     RETURN_STOCK_ACTIONS,
+    SETTLEMENT_TYPES,
     SUPPLIER_RETURN_SOURCES,
     SUPPLIER_RETURN_STATUSES,
     apply_credit_note_to_bill,
@@ -32,6 +33,7 @@ from accounting import (
     get_supplier_or_404,
     next_document_number,
     normalize_payment_mode,
+    normalize_refund_mode,
     resolve_credit_note_status,
     sync_customer_ledger,
     sync_supplier_ledger,
@@ -46,13 +48,14 @@ router = APIRouter(prefix="/api/v1", tags=["accounting"], dependencies=[Depends(
 
 def normalize_settlement_type(value: str | None) -> str:
     normalized = " ".join((value or "").strip().split()).title()
-    if normalized in {"Creditnote", "Credit Note"}:
-        return "Credit Note"
-    if normalized in {"Adjustoutstanding", "Adjust Outstanding"}:
-        return "Adjust Outstanding"
-    if normalized in {"Refund"}:
-        return "Refund"
-    raise HTTPException(status_code=400, detail="Settlement type must be Refund, Credit Note, or Adjust Outstanding.")
+    aliases = {"Creditnote": "Credit Note", "Adjustoutstanding": "Adjust Outstanding", "Norefund": "No Refund"}
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in SETTLEMENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Settlement type must be Refund, Credit Note, Adjust Outstanding, or No Refund.",
+        )
+    return normalized
 
 
 async def load_sales_return(db: AsyncSession, return_id: int) -> models.SalesReturn | None:
@@ -197,6 +200,19 @@ async def get_daily_ledger(ledger_date: date, db: AsyncSession = Depends(get_db)
             models.SupplierStockReturn.status == "Accepted",
         )
     )
+    refund_result = await db.execute(
+        select(models.SalesReturn.refund_mode, func.coalesce(func.sum(models.SalesReturn.refund_amount), 0))
+        .where(
+            func.date(models.SalesReturn.return_date) == ledger_date,
+            models.SalesReturn.settlement_type == "Refund",
+        )
+        .group_by(models.SalesReturn.refund_mode)
+    )
+    # Refunds recorded before refund modes existed have no mode; count them as Cash.
+    refunds_by_mode: dict[str, float] = {}
+    for mode, amount in refund_result.all():
+        key = mode or "Cash"
+        refunds_by_mode[key] = refunds_by_mode.get(key, 0.0) + float(amount or 0)
 
     totals = calculate_daily_ledger_totals(
         sales_by_mode=sales_by_mode,
@@ -205,6 +221,7 @@ async def get_daily_ledger(ledger_date: date, db: AsyncSession = Depends(get_db)
         sales_return_value=sales_return_result.scalar_one(),
         supplier_return_credit=stock_return_credit_result.scalar_one(),
         purchase_payments=purchase_payment_result.scalar_one(),
+        refunds_by_mode=refunds_by_mode,
     )
     return {"ledger_date": ledger_date, **totals}
 
@@ -309,13 +326,17 @@ async def create_sales_return(
     requested_quantity_by_sale_item: dict[int, int] = {}
     total_return_amount = 0.0
 
+    settlement_type = normalize_settlement_type(payload.settlement_type)
+    refund_mode = normalize_refund_mode(payload.refund_mode) if settlement_type == "Refund" else None
+
     try:
         db_return = models.SalesReturn(
             bill_id=bill.id,
             customer_id=effective_customer_id,
             return_date=combine_date_at_start(payload.return_date),
             reason=payload.reason.strip(),
-            settlement_type=normalize_settlement_type(payload.settlement_type),
+            settlement_type=settlement_type,
+            refund_mode=refund_mode,
             notes=payload.notes,
             status="Completed",
         )
@@ -439,8 +460,8 @@ async def create_sales_return(
         db_return.refund_amount = return_financials["refund_amount"]
         db_return.credit_note_amount = return_financials["credit_note_amount"]
 
-        # The return value reduces the bill's outstanding exactly once: through the
-        # credit note when one is created, otherwise directly (refund settlement).
+        # The return value reduces the bill's outstanding exactly once: through the credit
+        # note when one is created, otherwise directly (Refund). No Refund applies nothing.
         if return_financials["create_credit_note"]:
             credit_note = await create_credit_note_record(
                 db,
@@ -454,7 +475,9 @@ async def create_sales_return(
             db_return.credit_note_amount = credit_note.amount
             db_return.applied_outstanding_amount = credit_note.applied_amount
         else:
-            db_return.applied_outstanding_amount = await apply_credit_note_to_bill(bill, db_return.total_amount)
+            db_return.applied_outstanding_amount = await apply_credit_note_to_bill(
+                bill, return_financials["applied_outstanding_amount"]
+            )
 
         await sync_customer_ledger(db, effective_customer_id)
         await db.commit()

@@ -361,7 +361,8 @@ class SalesReturn(TimestampMixin, Base):
     customer_id = Column(Integer, ForeignKey("customers.id"))
     return_date = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     reason = Column(Text, nullable=False)
-    settlement_type = Column(String, nullable=False, default="Credit Note")
+    settlement_type = Column(String, nullable=False, default="Credit Note")  # Refund, Credit Note, Adjust Outstanding, No Refund
+    refund_mode = Column(String)  # Cash, UPI, Card — only for settlement_type "Refund"
     total_amount = Column(Float, default=0)
     applied_outstanding_amount = Column(Float, default=0)
     refund_amount = Column(Float, default=0)

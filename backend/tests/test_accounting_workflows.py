@@ -14,6 +14,7 @@ from accounting import (
     compute_bill_payment_state,
     compute_followup_payment_state,
     compute_sales_return_financials,
+    normalize_refund_mode,
 )
 
 
@@ -64,6 +65,20 @@ class AccountingWorkflowTests(unittest.TestCase):
         self.assertEqual(refund_financials["applied_outstanding_amount"], 120)
         self.assertEqual(refund_financials["refund_amount"], 180)
         self.assertFalse(refund_financials["create_credit_note"])
+
+    def test_no_refund_return_leaves_money_untouched(self):
+        financials = compute_sales_return_financials(300, 120, "No Refund")
+        self.assertEqual(financials["total_amount"], 300)
+        self.assertEqual(financials["applied_outstanding_amount"], 0)
+        self.assertEqual(financials["refund_amount"], 0)
+        self.assertEqual(financials["credit_note_amount"], 0)
+        self.assertFalse(financials["create_credit_note"])
+
+    def test_refund_mode_validation(self):
+        self.assertEqual(normalize_refund_mode("upi"), "UPI")
+        self.assertEqual(normalize_refund_mode(None), "Cash")
+        with self.assertRaises(HTTPException):
+            normalize_refund_mode("Credit")
 
     def test_sales_return_batch_allocation_rejects_excess(self):
         plan = build_return_allocation_plan(
@@ -145,7 +160,12 @@ class AccountingWorkflowTests(unittest.TestCase):
             sales_return_value=120,
             supplier_return_credit=60,
             purchase_payments=300,
+            refunds_by_mode={"Cash": 40, "UPI": 25.5},
         )
+        self.assertEqual(totals["cash_refunds"], 40)
+        self.assertEqual(totals["upi_refunds"], 25.5)
+        self.assertEqual(totals["card_refunds"], 0)
+        self.assertEqual(totals["total_refunds"], 65.5)
         self.assertEqual(totals["cash_sales"], 1000)
         self.assertEqual(totals["upi_sales"], 500)
         self.assertEqual(totals["card_sales"], 250)

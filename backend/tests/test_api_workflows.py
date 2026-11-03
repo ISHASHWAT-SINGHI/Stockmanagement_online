@@ -98,11 +98,14 @@ class ApiWorkflowTests(unittest.IsolatedAsyncioTestCase):
         detail = await self.request("GET", f"/sales/{bill['id']}")
         return customer, product, detail
 
-    async def create_return(self, bill, product, quantity, amount, settlement_type, stock_action="SELLABLE", expected=200):
+    async def create_return(self, bill, product, quantity, amount, settlement_type, stock_action="SELLABLE",
+                            refund_mode=None, expected=200):
         return await self.request("POST", "/sales-returns", {
             "bill_id": bill["id"],
+            "return_date": date.today().isoformat(),
             "reason": "Customer return",
             "settlement_type": settlement_type,
+            "refund_mode": refund_mode,
             "items": [{
                 "sale_item_id": bill["sales_items"][0]["id"],
                 "product_id": product["id"],
@@ -152,6 +155,44 @@ class ApiWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request("GET", f"/sales/{bill['id']}"))["outstanding_amount"], 0)
         [credit_note] = await self.request("GET", "/credit-notes")
         self.assertEqual((credit_note["amount"], credit_note["applied_amount"], credit_note["status"]), (400, 300, "Partially Applied"))
+
+    async def test_upi_refund_settles_due_first_and_reports_refund_by_mode(self):
+        _, product, bill = await self.create_bill_with_outstanding()
+
+        sales_return = await self.create_return(
+            bill, product, quantity=4, amount=400, settlement_type="Refund", refund_mode="UPI"
+        )
+
+        self.assertEqual(sales_return["refund_mode"], "UPI")
+        self.assertEqual(sales_return["applied_outstanding_amount"], 300)
+        self.assertEqual(sales_return["refund_amount"], 100)
+        self.assertEqual(await self.request("GET", "/credit-notes"), [])
+        ledger = await self.request("GET", f"/daily-ledger?ledger_date={date.today().isoformat()}")
+        self.assertEqual((ledger["upi_refunds"], ledger["cash_refunds"], ledger["total_refunds"]), (100, 0, 100))
+        self.assertEqual(ledger["sales_returns"], 400)
+
+    async def test_no_refund_return_restocks_without_touching_the_bill(self):
+        customer, product, bill = await self.create_bill_with_outstanding()
+
+        sales_return = await self.create_return(
+            bill, product, quantity=1, amount=100, settlement_type="No Refund", refund_mode="Cash"
+        )
+
+        self.assertEqual(sales_return["settlement_type"], "No Refund")
+        self.assertIsNone(sales_return["refund_mode"])
+        self.assertEqual((sales_return["applied_outstanding_amount"], sales_return["refund_amount"],
+                          sales_return["credit_note_amount"]), (0, 0, 0))
+        self.assertEqual((await self.request("GET", f"/sales/{bill['id']}"))["outstanding_amount"], 300)
+        self.assertEqual((await self.request("GET", f"/products/{product['id']}"))["current_stock"], 7)
+        self.assertEqual((await self.request("GET", f"/customers/{customer['id']}/ledger"))["outstanding_balance"], 300)
+
+    async def test_invalid_settlement_or_refund_mode_is_rejected(self):
+        _, product, bill = await self.create_bill_with_outstanding()
+
+        await self.create_return(bill, product, quantity=1, amount=100, settlement_type="Cash Refund", expected=400)
+        await self.create_return(bill, product, quantity=1, amount=100, settlement_type="Refund",
+                                 refund_mode="Credit", expected=400)
+        self.assertEqual(await self.request("GET", "/sales-returns"), [])
 
     async def test_supplier_ledger_loads_with_stock_returns(self):
         supplier = await self.request("POST", "/suppliers", {"company_name": "Ledger Supplier", "gst_number": "27ABCDE1234F1Z5"})

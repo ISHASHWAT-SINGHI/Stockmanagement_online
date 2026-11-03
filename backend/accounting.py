@@ -12,6 +12,8 @@ from sqlalchemy.future import select
 import models
 
 PAYMENT_MODES = {"Cash", "UPI", "Card", "Credit"}
+REFUND_MODES = {"Cash", "UPI", "Card"}
+SETTLEMENT_TYPES = {"Refund", "Credit Note", "Adjust Outstanding", "No Refund"}
 DAMAGE_ADJUSTMENT_TYPES = {"DAMAGE", "EXPIRY", "BROKEN", "LEAKED", "NON_SELLABLE"}
 RETURN_STOCK_ACTIONS = {"SELLABLE", "DAMAGED", "NON_SELLABLE"}
 SUPPLIER_RETURN_STATUSES = {"Pending", "Sent", "Accepted", "Rejected"}
@@ -45,6 +47,14 @@ def normalize_payment_mode(mode: str | None) -> str | None:
         normalized = "UPI"
     if normalized not in PAYMENT_MODES:
         raise HTTPException(status_code=400, detail="Payment mode must be Cash, UPI, Card, or Credit.")
+    return normalized
+
+
+def normalize_refund_mode(mode: str | None) -> str:
+    """Refund settlements pay out in Cash, UPI or Card; Cash when not given."""
+    normalized = normalize_payment_mode(mode) or "Cash"
+    if normalized not in REFUND_MODES:
+        raise HTTPException(status_code=400, detail="Refund mode must be Cash, UPI, or Card.")
     return normalized
 
 
@@ -164,8 +174,14 @@ def calculate_daily_ledger_totals(
     sales_return_value: float,
     supplier_return_credit: float,
     purchase_payments: float = 0.0,
+    refunds_by_mode: dict[str, float] | None = None,
 ) -> dict[str, float]:
+    refunds = {mode: clamp_money((refunds_by_mode or {}).get(mode)) for mode in ("Cash", "UPI", "Card")}
     return {
+        "cash_refunds": refunds["Cash"],
+        "upi_refunds": refunds["UPI"],
+        "card_refunds": refunds["Card"],
+        "total_refunds": round(sum(refunds.values()), 2),
         "cash_sales": clamp_money(sales_by_mode.get("Cash")),
         "upi_sales": clamp_money(sales_by_mode.get("UPI")),
         "card_sales": clamp_money(sales_by_mode.get("Card")),
@@ -187,6 +203,16 @@ def compute_sales_return_financials(
     outstanding = clamp_money(current_outstanding_amount)
     applied_outstanding = min(total_amount, outstanding)
     remaining = round(max(total_amount - applied_outstanding, 0.0), 2)
+
+    if settlement_type == "No Refund":
+        # Goods come back, but the customer receives nothing and the bill is left as it is.
+        return {
+            "total_amount": total_amount,
+            "applied_outstanding_amount": 0.0,
+            "refund_amount": 0.0,
+            "credit_note_amount": 0.0,
+            "create_credit_note": False,
+        }
 
     if settlement_type == "Refund":
         return {

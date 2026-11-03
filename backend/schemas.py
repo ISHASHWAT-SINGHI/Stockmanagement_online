@@ -485,6 +485,7 @@ class SalesReturnCreate(BaseModel):
     return_date: Optional[date] = None
     reason: str
     settlement_type: str = "Credit Note"
+    refund_mode: Optional[str] = None  # Cash / UPI / Card, used when settlement_type is "Refund"
     notes: Optional[str] = None
     items: List[SalesReturnItemCreate]
 
@@ -497,6 +498,7 @@ class SalesReturnResponse(BaseModel):
     return_date: datetime
     reason: str
     settlement_type: str
+    refund_mode: Optional[str] = None
     total_amount: float = 0
     applied_outstanding_amount: float = 0
     refund_amount: float
@@ -566,6 +568,10 @@ class DailyLedgerResponse(BaseModel):
     stock_return_credit: float
     total_collection: float
     total_outstanding: float
+    cash_refunds: float = 0
+    upi_refunds: float = 0
+    card_refunds: float = 0
+    total_refunds: float = 0
 
 
 SalesBillDetailResponse.model_rebuild()
