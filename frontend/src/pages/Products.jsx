@@ -6,7 +6,7 @@ import { useToast } from '../hooks/useToast';
 import Modal from '../components/Modal';
 import { getStockBatchesForProduct, adjustStock } from '../api';
 
-const empty = { brand_name: '', product_name: '', packing_type: 'Unit', units_per_pack: 1, current_stock: 0 };
+const empty = { brand_name: '', product_name: '', packing_type: 'Unit', units_per_pack: 1 };
 const defaultFilters = { search: '', brand: '', category: '', stock_status: '', gst_rate: '', sort_by: 'name_asc' };
 
 export default function Products() {

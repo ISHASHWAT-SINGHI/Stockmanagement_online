@@ -81,13 +81,15 @@ class ProductBase(BaseModel):
     product_name: str
     packing_type: str = "Unit"
     units_per_pack: int = 1
-    current_stock: int = 0
 
 class ProductCreate(ProductBase):
+    # Stock is deliberately not accepted here: it only changes through purchases, sales,
+    # returns and adjustments so batches and the stock ledger stay consistent.
     pass
 
 class ProductResponse(ProductBase):
     id: int
+    current_stock: int = 0
     non_sellable_stock: int = 0
     is_archived: bool
     class Config:
