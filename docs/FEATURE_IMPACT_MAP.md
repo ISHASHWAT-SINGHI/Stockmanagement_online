@@ -342,28 +342,22 @@ If `stock_action = "DAMAGED"` or `NON_SELLABLE`:
 
 ### D. Ledger/accounting effect
 
-Current code supports settlement types:
+Settlement types and how the screen options map to them:
 
-- `Refund`
-- `Credit Note`
-- `Adjust Outstanding`
+| Screen option | `settlement_type` | `refund_mode` | Effect on money |
+|---|---|---|---|
+| Cash Refund / UPI Refund | `Refund` | `Cash` / `UPI` (API also accepts `Card`) | Return value first clears the bill's outstanding; the remainder is `refund_amount`, paid out in that mode |
+| Adjust Against Due | `Adjust Outstanding` | — | Credit note for the full value, applied to the bill's outstanding; any excess stays as open customer credit |
+| Customer Credit / Store Credit | `Credit Note` | — | Same as above |
+| No Refund | `No Refund` | — | Nothing: no refund, no credit note, outstanding unchanged. Only stock moves. |
 
-Current implementation detail:
-
-- `compute_sales_return_financials()` treats only `Refund` as refund logic.
-- Any other supported settlement type currently routes into the customer credit-note path.
-
-That means:
-
-- outstanding may be reduced by `apply_credit_note_to_bill()`
-- `refund_amount` is used only for `Refund`
-- `credit_note_amount` is created for non-refund settlements
+In every case the value reduces the bill's outstanding **at most once** (through the credit note, or directly for `Refund`).
 
 ### E. Daily Ledger effect
 
-- `sales_returns` in Daily Ledger is the sum of `sales_returns.total_amount` for the selected date.
-- There is no dedicated separate "cash refund outflow" line currently.
-- Reviewers should interpret Daily Ledger sales-return value as return activity amount, not necessarily net cash-out only.
+- `sales_returns` in Daily Ledger is the sum of `sales_returns.total_amount` for the selected date (value of goods returned, all settlement types).
+- `cash_refunds`, `upi_refunds`, `card_refunds` and `total_refunds` are the money actually paid out (`refund_amount` of `Refund` returns, grouped by `refund_mode`). Older refunds with no mode count as Cash.
+- The Daily Ledger screen's Net Movement is collections − purchase payments − refunds.
 
 ### F. Example scenario
 
@@ -384,7 +378,7 @@ Example: Customer returns item worth `₹500` and receives cash refund.
 - Return customer must match original bill customer when the bill already has one.
 - The original bill is not deleted or rewritten.
 - `Adjust Outstanding` and `Credit Note` are both customer-side concepts in the current code.
-- Current defects in this flow (UI settlement values rejected, non-sellable returns crashing, outstanding reduced twice) are tracked in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) as F1–F3.
+- Defects in this flow (UI settlement values rejected, non-sellable returns crashing, outstanding reduced twice) are fixed on `dev`. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) F1–F3.
 
 ## 6. Supplier Stock Returns
 
@@ -1002,15 +996,9 @@ Current code does not have a dedicated `supplier_credit_notes` model/table. Supp
 2. Customer credit-note semantics:
 The current `credit_notes` table is customer-side and is also used by sales return settlement flows. It should not be interpreted as supplier credit notes.
 
-3. Sales return settlement vocabulary:
-Business requested settlement options such as `Cash Refund`, `UPI Refund`, `Adjust Against Due`, `Customer Credit / Store Credit`, `No Refund`. Current backend normalization supports only:
-- `Refund`
-- `Credit Note`
-- `Adjust Outstanding`
-More granular refund-mode tracking would need separate implementation if required.
+3. Sales return settlement vocabulary: **resolved on `dev`**. All five business options are supported through `settlement_type` + `refund_mode` (see Sales Returns, section D).
 
-4. Daily Ledger refund treatment:
-Daily Ledger currently exposes `sales_returns` total but does not separately expose refund outflow by refund mode. If the business needs net cash-position reporting by refund type, that needs additional design.
+4. Daily Ledger refund treatment: **resolved on `dev`**. Refunds paid out are reported by mode (`cash_refunds`, `upi_refunds`, `card_refunds`, `total_refunds`).
 
 5. Dashboard accounting cards:
 Receivable, payable, and net position currently belong to `/api/v1/accounting/summary`, not the dashboard reports endpoint. If those values must appear on the main dashboard, frontend integration or endpoint expansion may be needed.

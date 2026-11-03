@@ -161,6 +161,7 @@ Supabase also keeps its own scheduled backups, depending on the plan.
 | UI keeps returning to `/login` | Token expired (7 days), or `JWT_SECRET_KEY` changed. Log in again. |
 | Frontend calls fail only in production | `VITE_API_URL` not set at build time. Rebuild after setting it. |
 | New column "does not exist" after deploy | `alembic upgrade head` was not run against that database. |
+| `column sales_returns.refund_mode does not exist` (503 on Daily Ledger, Customer Ledger, Sales Returns) | The code is ahead of the database: migration `91b5d1548229` was not applied. Run `alembic upgrade head`. The migration is additive, so code from `main` keeps working after it. |
 
 ## Conventions
 

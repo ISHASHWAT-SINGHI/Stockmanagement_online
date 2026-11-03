@@ -153,7 +153,7 @@ Stock adjustment behavior:
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/daily-ledger?ledger_date=YYYY-MM-DD` | → `{ledger_date, cash_sales, upi_sales, card_sales, credit_sales, purchase_payments, sales_returns, stock_return_credit, total_collection, total_outstanding}` |
+| GET | `/daily-ledger?ledger_date=YYYY-MM-DD` | → `{ledger_date, cash_sales, upi_sales, card_sales, credit_sales, purchase_payments, sales_returns, stock_return_credit, total_collection, total_outstanding, cash_refunds, upi_refunds, card_refunds, total_refunds}`. `sales_returns` is the value of goods returned; `*_refunds` is money paid out, by refund mode. |
 | GET | `/accounting/summary` | → `{total_customer_receivable, total_supplier_payable, net_position}` from the cached ledger tables. |
 
 ## Credit notes — `/api/v1` (customer-side)
@@ -178,7 +178,8 @@ Stock adjustment behavior:
   "customer_id": 7,
   "return_date": "2026-05-12",
   "reason": "Wrong size",
-  "settlement_type": "Credit Note",
+  "settlement_type": "Refund",
+  "refund_mode": "UPI",
   "notes": null,
   "items": [
     { "sale_item_id": 88, "product_id": 12, "quantity": 2, "amount": 199.5, "stock_action": "SELLABLE", "reason": "Wrong size" }
@@ -186,10 +187,14 @@ Stock adjustment behavior:
 }
 ```
 
-- `settlement_type` must normalize to **`Refund`**, **`Credit Note`**, or **`Adjust Outstanding`** (case- and space-insensitive). Anything else returns 400. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md): the current UI sends other values.
+- `settlement_type` must normalize to **`Refund`**, **`Credit Note`**, **`Adjust Outstanding`**, or **`No Refund`** (case- and space-insensitive). Anything else returns 400.
+  - `Refund`: the value first clears the bill's outstanding; the rest is `refund_amount`. `refund_mode` must be `Cash`, `UPI`, or `Card` (default `Cash`; anything else returns 400).
+  - `Credit Note` / `Adjust Outstanding`: a credit note for the full value is created and applied to the bill's outstanding; any excess stays open.
+  - `No Refund`: stock is restored only. No refund, no credit note, outstanding unchanged.
+  - `refund_mode` is ignored (stored as null) for non-refund settlements.
 - `stock_action`: `SELLABLE` (back to available stock), `DAMAGED` or `NON_SELLABLE` (into non-sellable stock).
 - 400 when: items are empty, a line does not belong to the bill, the quantity exceeds what was sold minus earlier returns, the amount exceeds the original per-unit value × quantity, or the customer does not match.
-- Side effects: return rows and batch allocations, stock updates and ledger rows, the bill's outstanding balance reduced, a credit note created for non-refund settlements, and a customer ledger re-sync.
+- Side effects: return rows and batch allocations, stock updates and stock-ledger rows, the bill's outstanding reduced (except `No Refund`), a credit note for `Credit Note` / `Adjust Outstanding`, and a customer ledger re-sync.
 
 ## Supplier stock returns — `/api/v1`
 

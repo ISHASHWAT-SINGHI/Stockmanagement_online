@@ -164,7 +164,12 @@ Reading a single ledger (`GET /customers/{id}/ledger`, `/suppliers/{id}/ledger`)
 ### Credit notes and sales returns
 
 - A customer credit note is first applied against the linked bill's outstanding amount (`apply_credit_note_to_bill`). The applied portion is stored in `applied_amount`, and the status becomes `Open`, `Partially Applied`, or `Applied`.
-- A sales return sums its item amounts, each capped at the original per-unit value × quantity. It reduces the bill's outstanding balance, then either records a refund (`Refund`) or creates a linked credit note (`Credit Note` / `Adjust Outstanding`).
+- A sales return sums its item amounts, each capped at the original per-unit value × quantity, then settles in one of four ways:
+  - `Refund` (with `refund_mode` Cash/UPI/Card): clears the bill's outstanding first and pays out the rest.
+  - `Credit Note` / `Adjust Outstanding`: creates a linked credit note, which is applied to the outstanding.
+  - `No Refund`: leaves the money side untouched.
+
+  The outstanding is reduced at most once.
 - Document numbers come from the row ID: `CN-00001`, `SR-00001`, `STR-00001`.
 
 There is no separate supplier credit note table. Supplier credit is the `credit_amount` on a supplier stock return, and it counts only while the return's status is `Accepted`.
@@ -177,6 +182,7 @@ There is no separate supplier credit note table. Supplier credit is the `credit_
 - Collections: that day's `payment_transactions`, plus legacy paid amounts.
 - Outstanding: `Σ outstanding_amount` of that day's bills.
 - Purchase payments, sales return totals, and accepted supplier return credit for that day.
+- Refunds paid out that day, by `refund_mode` (Cash, UPI, Card). Legacy refunds with no mode count as Cash.
 
 ## Purchase idempotency
 

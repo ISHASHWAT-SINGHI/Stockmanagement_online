@@ -131,7 +131,7 @@ Always row `id = 1`. It is created with defaults the first time it is read. Fiel
 ## Returns and credit
 
 ### `sales_returns`  · Timestamp
-`return_number` (`SR-00001`), `bill_id`, `customer_id`, `return_date`, `reason`, `settlement_type` (`Refund` / `Credit Note` / `Adjust Outstanding`), `total_amount`, `applied_outstanding_amount`, `refund_amount`, `credit_note_amount`, `status` (`Completed`), `notes`.
+`return_number` (`SR-00001`), `bill_id`, `customer_id`, `return_date`, `reason`, `settlement_type` (`Refund` / `Credit Note` / `Adjust Outstanding` / `No Refund`), `refund_mode` (`Cash` / `UPI` / `Card`, only for `Refund`; null on refunds recorded before migration 9), `total_amount`, `applied_outstanding_amount`, `refund_amount`, `credit_note_amount`, `status` (`Completed`), `notes`.
 
 ### `sales_return_items`
 `sales_return_id`, `sale_item_id`, `product_id`, `quantity`, `amount`, `stock_action` (`SELLABLE` / `DAMAGED` / `NON_SELLABLE`), `reason`, `product_name_snapshot`.
@@ -174,7 +174,8 @@ Run from `backend/`: `alembic upgrade head`. The chain is linear:
 | 5 | `2e1ff04195dc` | 2026-04-06 | `products.is_archived` |
 | 6 | `a3d4b2c1e5f6` | 2026-05-03 | Bill sequences, FY numbering, revisions, batch allocations, name snapshots, with **backfill** of existing bills and snapshots |
 | 7 | `f4b9c7d2a1e0` | 2026-05-03 | `purchase_invoices.client_request_id` |
-| 8 | `9b7f6c4d2e10` | 2026-05-10 | **head.** Accounting workflow: sales returns, credit notes, supplier stock returns and payments, supplier ledger, non-sellable stock columns, `is_initial_payment`, ledger columns |
+| 8 | `9b7f6c4d2e10` | 2026-05-10 | Accounting workflow: sales returns, credit notes, supplier stock returns and payments, supplier ledger, non-sellable stock columns, `is_initial_payment`, ledger columns |
+| 9 | `91b5d1548229` | 2026-11-03 | **head** (on `dev`). `sales_returns.refund_mode` (nullable, additive). Must be applied before deploying code from `dev`. |
 
 Creating a new migration:
 
