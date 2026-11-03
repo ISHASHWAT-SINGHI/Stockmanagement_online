@@ -88,7 +88,7 @@ class Product(TimestampMixin, SoftDeleteMixin, Base):
     packing_type = Column(String, default="Unit")
     units_per_pack = Column(Integer, default=1)
     current_stock = Column(Integer, default=0)
-    non_sellable_stock = Column(Integer, default=0)
+    non_sellable_stock = Column(Integer, default=0, nullable=False)
     is_archived = Column(Boolean, default=False, nullable=False, index=True)
 
     # Future-proof optional fields (additive — no breaking migrations later)
@@ -175,7 +175,7 @@ class StockBatch(Base):
     gst_percentage = Column(Float)
     initial_quantity = Column(Integer)
     available_quantity = Column(Integer)
-    non_sellable_quantity = Column(Integer, default=0)
+    non_sellable_quantity = Column(Integer, default=0, nullable=False)
     purchase_date = Column(Date)
     expiry_date = Column(Date)
 
@@ -316,9 +316,9 @@ class CustomerLedger(Base):
     __tablename__ = "customer_ledger"
     customer_id = Column(Integer, ForeignKey("customers.id"), primary_key=True)
     total_credit = Column(Float, default=0)
-    total_billed = Column(Float, default=0)
+    total_billed = Column(Float, default=0, nullable=False)
     total_paid = Column(Float, default=0)
-    total_credit_notes = Column(Float, default=0)
+    total_credit_notes = Column(Float, default=0, nullable=False)
     outstanding_balance = Column(Float, default=0)
 
     customer = relationship("Customer", back_populates="ledger")
