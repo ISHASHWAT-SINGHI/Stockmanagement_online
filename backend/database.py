@@ -9,8 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import NullPool
 
-# Load the backend-local .env no matter which directory uvicorn is started from.
-load_dotenv(Path(__file__).with_name(".env"))
+BACKEND_DIR = Path(__file__).resolve().parent
+# Credentials live in the git-ignored <repo>/secrets/backend.env (template: secrets.example/).
+# backend/.env is still read as a fallback; neither overrides variables already set (e.g. on Render).
+ENV_FILES = (BACKEND_DIR.parent / "secrets" / "backend.env", BACKEND_DIR / ".env")
+for env_file in ENV_FILES:
+    load_dotenv(env_file)
 
 DB_CONNECT_RETRIES = int(os.getenv("DB_CONNECT_RETRIES", "3"))
 DB_CONNECT_RETRY_DELAY_SECONDS = float(os.getenv("DB_CONNECT_RETRY_DELAY_SECONDS", "2"))

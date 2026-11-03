@@ -5,6 +5,7 @@ Loads DATABASE_URL from .env via python-dotenv.
 import os
 import asyncio
 from logging.config import fileConfig
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import pool
@@ -12,8 +13,10 @@ from sqlalchemy import pool
 from alembic import context
 from dotenv import load_dotenv
 
-# ─── Load .env ────────────────────────────────────────────────────────────────
-load_dotenv()
+# ─── Load credentials (same files as database.py) ─────────────────────────────
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_DIR.parent / "secrets" / "backend.env")
+load_dotenv(BACKEND_DIR / ".env")
 
 # ─── Alembic Config ───────────────────────────────────────────────────────────
 config = context.config

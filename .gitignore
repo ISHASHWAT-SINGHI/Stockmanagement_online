@@ -1,3 +1,10 @@
+# Credentials — never commit. All real secrets live in secrets/ (see secrets.example/)
+secrets/
+*.env
+.env.*
+!*.env.example
+!.env.example
+
 # Python
 venv/
 __pycache__/
@@ -5,9 +12,12 @@ __pycache__/
 .env
 db.sqlite3
 
-# Runtime logs
+# Runtime logs and local data (contain DB host/user names and business data)
 *.log
 backend/*.log
+backend/output.txt
+backend/backups/
+exports/
 
 # Node
 node_modules/
