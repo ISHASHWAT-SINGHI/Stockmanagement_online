@@ -104,5 +104,6 @@ Frontend setting (build time):
 | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Every HTTP endpoint with parameters, payloads, and side effects. |
 | [docs/FEATURE_IMPACT_MAP.md](docs/FEATURE_IMPACT_MAP.md) | Business view: how each feature affects stock, ledgers, and the daily ledger. |
 | [docs/FRONTEND.md](docs/FRONTEND.md) | Routes, pages, shared components, keyboard shortcuts, billing calculations. |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Setup, migrations, tests, utility scripts, deployment, troubleshooting. |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Setup, migrations, tests, utility scripts, troubleshooting. |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Branch model (`dev` → `deploy`), release checklist, hosting settings, rollback, release log. |
 | [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) | Confirmed bugs, security risks, and gaps found during the code review. |

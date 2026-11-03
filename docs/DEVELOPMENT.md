@@ -120,6 +120,8 @@ Run these from `backend/` with the venv active. They act on whatever database `s
 
 ## Deployment
 
+> The branch model and release checklist are in **[DEPLOYMENT.md](DEPLOYMENT.md)**. Production builds only from the `deploy` branch. The settings below are the hosting reference.
+
 ### Backend (Render)
 
 - Root directory: `backend`
