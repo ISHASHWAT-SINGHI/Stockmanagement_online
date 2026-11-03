@@ -17,14 +17,14 @@ Important interpretation:
 
 This document is based on the **current backend codebase**, especially:
 
-- [backend/models.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/models.py:1)
-- [backend/accounting.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/accounting.py:1)
-- [backend/routers/products.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/routers/products.py:1)
-- [backend/routers/purchases.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/routers/purchases.py:1)
-- [backend/routers/sales.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/routers/sales.py:1)
-- [backend/routers/accounting.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/routers/accounting.py:1)
-- [backend/routers/contacts.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/routers/contacts.py:1)
-- [backend/routers/reports.py](/c:/Users/ssrat/Desktop/New%20folder/Project/stockmanagement_online/backend/routers/reports.py:1)
+- [backend/models.py](../backend/models.py)
+- [backend/accounting.py](../backend/accounting.py)
+- [backend/routers/products.py](../backend/routers/products.py)
+- [backend/routers/purchases.py](../backend/routers/purchases.py)
+- [backend/routers/sales.py](../backend/routers/sales.py)
+- [backend/routers/accounting.py](../backend/routers/accounting.py)
+- [backend/routers/contacts.py](../backend/routers/contacts.py)
+- [backend/routers/reports.py](../backend/routers/reports.py)
 
 Where current behavior is unclear or not fully implemented, it is explicitly marked as `Needs confirmation` or `Not currently implemented`.
 
@@ -384,6 +384,7 @@ Example: Customer returns item worth `₹500` and receives cash refund.
 - Return customer must match original bill customer when the bill already has one.
 - The original bill is not deleted or rewritten.
 - `Adjust Outstanding` and `Credit Note` are both customer-side concepts in the current code.
+- Current defects in this flow (UI settlement values rejected, non-sellable returns crashing, outstanding reduced twice) are tracked in [KNOWN_ISSUES.md](KNOWN_ISSUES.md) as F1–F3.
 
 ## 6. Supplier Stock Returns
 
