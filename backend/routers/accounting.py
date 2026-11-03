@@ -415,6 +415,7 @@ async def create_sales_return(
                         product.non_sellable_stock,
                     ) = apply_non_sellable_customer_return(
                         batch.non_sellable_quantity,
+                        product.non_sellable_stock,
                         quantity,
                     )
 
@@ -435,10 +436,11 @@ async def create_sales_return(
         )
 
         db_return.total_amount = return_financials["total_amount"]
-        db_return.applied_outstanding_amount = await apply_credit_note_to_bill(bill, db_return.total_amount)
         db_return.refund_amount = return_financials["refund_amount"]
         db_return.credit_note_amount = return_financials["credit_note_amount"]
 
+        # The return value reduces the bill's outstanding exactly once: through the
+        # credit note when one is created, otherwise directly (refund settlement).
         if return_financials["create_credit_note"]:
             credit_note = await create_credit_note_record(
                 db,
@@ -450,6 +452,9 @@ async def create_sales_return(
                 credit_date=payload.return_date,
             )
             db_return.credit_note_amount = credit_note.amount
+            db_return.applied_outstanding_amount = credit_note.applied_amount
+        else:
+            db_return.applied_outstanding_amount = await apply_credit_note_to_bill(bill, db_return.total_amount)
 
         await sync_customer_ledger(db, effective_customer_id)
         await db.commit()
